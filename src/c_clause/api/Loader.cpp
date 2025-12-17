@@ -181,6 +181,12 @@ void Loader::setRuleOptions(std::map<std::string, std::string> options, RuleFact
         {"xxd_min_support", [&ruleFactory](std::string val) {ruleFactory.setMinCorrect(std::stoi(val), "xxd");}},
         {"xxd_min_preds", [&ruleFactory](std::string val) {ruleFactory.setMinPred(std::stoi(val), "xxd");}},
         {"xxd_min_conf", [&ruleFactory](std::string val) {ruleFactory.setMinConf(std::stod(val), "xxd");}},
+        // Combo
+        {"load_combo", [&ruleFactory](std::string val) {ruleFactory.setCreateCombo(util::stringToBool(val));}},
+        {"combo_debug", [&ruleFactory](std::string val) {ruleFactory.setComboDebug(util::stringToBool(val));}},
+        {"combo_min_support", [&ruleFactory](std::string val) {ruleFactory.setMinCorrect(std::stoi(val), "m");}},
+        {"combo_min_pred", [&ruleFactory](std::string val) {ruleFactory.setMinPred(std::stoi(val), "m");}},
+        {"combo_min_conf", [&ruleFactory](std::string val) {ruleFactory.setMinConf(std::stod(val), "m");}},
         // other
         {"num_threads", [this](std::string val) {this->setNumThreads(std::stoi(val));}},
         

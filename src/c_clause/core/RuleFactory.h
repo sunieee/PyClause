@@ -19,6 +19,9 @@ public:
     // if numPreds and numTrue given it will also check if the rule should based on the member constraints
     // e.g. BminNumPreds
     std::unique_ptr<Rule> parseAnytimeRule(std::string rule, int numPreds=-1, int numTrue=-1);
+    
+    // Parse combo rule (multi-rule with semicolon separator)
+    void parseCombo(std::string rule, int numPreds, int numTrue);
 
     std::unique_ptr<Rule> parseUXXrule(std::vector<std::string> headBody, int numPreds=-1, int numTrue=-1);
     std::unique_ptr<Rule> parseUcRule(std::vector<std::string> headBody, int numPreds=-1, int numTrue=-1);
@@ -37,6 +40,8 @@ public:
     void setCreateRuleD(bool ind);
     void setCreateRuleXXd(bool ind);
     void setCreateRuleXXc(bool ind);
+    void setCreateCombo(bool ind);
+    void setComboDebug(bool ind);
     void setNumUnseen(int val, std::string type);
 
     void setMinCorrect(int val, std::string type);
@@ -51,9 +56,19 @@ public:
     void setBmaxLength(int val);
     void setCmaxLength(int val);
     void setDmaxLength(int val);
+    
+    // Set RuleStorage for combo parsing
+    void setRuleStorage(class RuleStorage* storage) { ruleStorage = storage; }
 
 private:
     std::shared_ptr<Index> index;
+    class RuleStorage* ruleStorage = nullptr;  // Non-owning pointer
+
+    // ***Rule options***
+    bool createCombo = true;
+    int MminCorrect = 1;
+    int MminPreds = 1;
+    double MminConf = 0.0;
 
     // ***Rule options***
     bool createRuleZ = true;

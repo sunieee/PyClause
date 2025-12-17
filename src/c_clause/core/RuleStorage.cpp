@@ -2,6 +2,7 @@
 #include "Index.h"
 #include "Globals.h"
 #include "Rule.h"
+#include "Combo.h"
 #include "Types.h"
 
 #include <fstream>
@@ -11,6 +12,8 @@
 RuleStorage::RuleStorage(std::shared_ptr<Index> index, std::shared_ptr<RuleFactory> ruleFactory){
     this->ruleFactory = ruleFactory;
     this->index = index;
+    // Set RuleStorage pointer in RuleFactory for combo parsing
+    this->ruleFactory->setRuleStorage(this);
 }
 
 
@@ -116,6 +119,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             catch(const std::exception& e)
                 {
                     std::cout<<"Could not parse this rule " + ruleLine<<std::endl;
+                    std::cout<<"[RuleStorage] Exception details: " << e.what() << std::endl;
                     std::cout<<"Skipping it, but please check your format."<<std::endl;
                     std::cout<<"And check that if entities are contained, that they are loaded with the data."<<std::endl;
                 }
@@ -207,6 +211,21 @@ bool RuleStorage::addAnyTimeRuleLine(std::string ruleLine, int id , bool exact){
 bool RuleStorage::addAnyTimeRuleWithStats(std::string ruleString, int id, int numPred, int numTrue, bool exact){
     std::unique_ptr<Rule> rule = ruleFactory->parseAnytimeRule(ruleString, numPred, numTrue);
     if (rule){
+        // Check for duplicate rules
+        std::string newRuleStr = rule->computeRuleString(index.get());
+        int targetRel = rule->getTargetRel();
+        
+        for (Rule* existingRule : relToRules[targetRel]) {
+            std::string existingStr = existingRule->computeRuleString(index.get());
+            if (existingStr == newRuleStr) {
+                std::cerr << "ERROR: Duplicate rule detected!" << std::endl;
+                std::cerr << "Existing Rule ID: " << existingRule->getID() << std::endl;
+                std::cerr << "New Rule ID: " << id << std::endl;
+                std::cerr << "Rule: " << newRuleStr << std::endl;
+                throw std::runtime_error("Duplicate rule in RuleStorage");
+            }
+        }
+        
         rule->setID(id);
         rule->setStats(numPred, numTrue, exact);
         relToRules[rule->getTargetRel()].insert(rule.get());
@@ -215,6 +234,24 @@ bool RuleStorage::addAnyTimeRuleWithStats(std::string ruleString, int id, int nu
     } else {
         return false;
     }
+}
+
+Rule* RuleStorage::findRuleByString(const std::string& headStr, const std::string& bodyStr) {
+    // Parse head to get target relation
+    strAtom headAtom;
+    ruleFactory->parseAtom(headStr, headAtom);
+    int targetRel = index->getIdOfRelationstring(headAtom[0]);
+    
+    // Search in rules for this relation
+    std::string fullRuleStr = headStr + _cfg_prs_ruleSeparator + bodyStr;
+    
+    for (Rule* rule : relToRules[targetRel]) {
+        std::string existingRuleStr = rule->computeRuleString(index.get());
+        if (existingRuleStr == fullRuleStr) return rule;
+    }
+    
+    // Rule not found
+    throw std::runtime_error("Cannot find rule for combo member: " + fullRuleStr);
 }
 
 
@@ -230,7 +267,21 @@ std::vector<std::unique_ptr<Rule>>& RuleStorage::getRules(){
     return rules;
  }
 
+void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
+    Combo* comboPtr = combo.get();
+    
+    // Add to storage
+    combos.push_back(std::move(combo));
+    
+    // Build inverted index
+    for (Rule* rule : comboPtr->memberRules) {
+        ruleIDToCombos[rule->getID()].push_back(comboPtr);
+    }
+}
+
 void RuleStorage::clearAll(){
     rules.clear();
     relToRules.clear();
+    combos.clear();
+    ruleIDToCombos.clear();
 }

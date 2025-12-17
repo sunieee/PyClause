@@ -3,6 +3,8 @@
 #include <cstring>
 
 #include "RuleFactory.h"
+#include "RuleStorage.h"
+#include "Combo.h"
 #include "Globals.h"
 #include "Types.h"
 
@@ -257,6 +259,13 @@ std::unique_ptr<Rule>RuleFactory::parseUXXrule(std::vector<std::string> headBody
 }
 
 std::unique_ptr<Rule> RuleFactory::parseAnytimeRule(std::string rule, int numPreds, int numTrue) {
+    // Check for combo (multi-rule) first - contains semicolon separator
+    if (rule.find(';') != std::string::npos) {
+        if (comboDebug) std::cout << "[RuleFactory] Detected semicolon - parsing as combo" << std::endl;
+        parseCombo(rule, numPreds, numTrue);
+        return nullptr;  // Combos don't create Rule objects
+    }
+    
     std::string ruleType;
     std::vector<std::string> headBody = util::splitString(rule, _cfg_prs_ruleSeparator);
     std::string headAtomStr = headBody[0];
@@ -779,6 +788,8 @@ void RuleFactory::setMinCorrect(int val, std::string type){
         XXCminCorrect = val;
     }else if (type=="d"){
         DminCorrect = val;
+    }else if (type=="m"){
+        MminCorrect = val;
     }else{
        throw std::runtime_error("Did not recognize rule type in setting min_correct: " + type );
     }
@@ -797,6 +808,8 @@ void RuleFactory::setMinPred(int val, std::string type){
         XXCminPreds = val;
     }else if (type=="d"){
         DminPreds = val;
+    }else if (type=="m"){
+        MminPreds = val;
     }else{
        throw std::runtime_error("Did not recognize rule type in setting min_preds: " + type );
     }
@@ -815,9 +828,81 @@ void RuleFactory::setMinConf(double val, std::string type){
         XXCminConf = val;
     }else if (type=="d"){
         DminConf = val;
+    }else if (type=="m"){
+        MminConf = val;
     }else{
-       throw std::runtime_error("Did not recognize rule type in setting min_preds: " + type );
+       throw std::runtime_error("Did not recognize rule type in setting min_conf: " + type );
     }
+}
+
+void RuleFactory::setCreateCombo(bool ind){
+    createCombo = ind;
+}
+
+void RuleFactory::setComboDebug(bool ind){
+    comboDebug = ind;
+}
+
+void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue) {
+    if (!createCombo || !ruleStorage) return;
+    
+    // Check thresholds
+    if (numPreds > 0 && MminPreds > numPreds) return;
+    if (numTrue > 0 && MminCorrect > numTrue) return;
+    if (numTrue > 0 && ((double)numTrue / (double)numPreds) < MminConf) return;
+    
+    // Split by rule separator "<=", should get head and composite body
+    std::vector<std::string> headBody = util::splitString(rule, _cfg_prs_ruleSeparator);
+    if (headBody.size() != 2) {
+        if (comboDebug) std::cout << "[parseCombo] ERROR: Invalid split, parts: " << headBody.size() << std::endl;
+        throw std::runtime_error("Invalid combo format: " + rule);
+    }
+    
+    std::string headStr = headBody[0];
+    std::string bodiesStr = headBody[1];
+    
+    if (comboDebug) {
+        std::cout << "[parseCombo] Head: " << headStr << std::endl;
+        std::cout << "[parseCombo] Bodies: " << bodiesStr << std::endl;
+    }
+    
+    // Split bodies by semicolon
+    std::vector<std::string> bodyParts = util::splitString(bodiesStr, ";");
+    if (bodyParts.empty() || bodyParts.size() < 2 || bodyParts.size() > 3) {
+        if (comboDebug) std::cout << "[parseCombo] ERROR: Invalid body count: " << bodyParts.size() << std::endl;
+        throw std::runtime_error("Combo must have 2-3 bodies: " + rule);
+    }
+    
+    if (comboDebug) std::cout << "[parseCombo] Found " << bodyParts.size() << " member bodies" << std::endl;
+    
+    // Parse each sub-rule
+    std::vector<Rule*> memberRules;
+    for (size_t i = 0; i < bodyParts.size(); ++i) {
+        std::string trimmedBody = bodyParts[i];
+        // Trim whitespace
+        size_t start = trimmedBody.find_first_not_of(" \t");
+        size_t end = trimmedBody.find_last_not_of(" \t");
+        if (start != std::string::npos && end != std::string::npos) {
+            trimmedBody = trimmedBody.substr(start, end - start + 1);
+        }
+        
+        if (comboDebug) std::cout << "[parseCombo] Processing member body " << (i+1) << ": " << trimmedBody << std::endl;
+        
+        Rule* rule = ruleStorage->findRuleByString(headStr, trimmedBody);
+        memberRules.push_back(rule);
+    }
+    
+    // Sort by rule ID
+    std::sort(memberRules.begin(), memberRules.end(), 
+              [](Rule* a, Rule* b) { return a->getID() < b->getID(); });
+    
+    if (comboDebug) std::cout << "[parseCombo] Creating combo with " << memberRules.size() << " members" << std::endl;
+    
+    // Create combo and add to storage
+    auto combo = std::make_unique<Combo>(memberRules, numTrue, numPreds);
+    ruleStorage->addCombo(std::move(combo));
+    
+    if (comboDebug) std::cout << "[parseCombo] Combo created successfully" << std::endl;
 }
 
 

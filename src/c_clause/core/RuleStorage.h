@@ -2,11 +2,13 @@
 #define RULESTORAGE_H
 
 #include "Rule.h"
+#include "Combo.h"
 #include "Globals.h"
 #include "Types.h"
 #include "RuleFactory.h"
 
 #include <vector>
+#include <memory>
 
 class RuleStorage
 {
@@ -30,6 +32,12 @@ public:
     std::set<Rule*, compareRule>& getRelRules(int relation);
     void clearAll();
     
+    // Combo-related methods
+    Rule* findRuleByString(const std::string& headStr, const std::string& bodyStr);
+    void addCombo(std::unique_ptr<Combo> combo);
+    std::unordered_map<int, std::vector<Combo*>>& getRuleIDToCombos() { return ruleIDToCombos; }
+    bool hasCombos() const { return !combos.empty(); }
+    
 
 private:
     // rules owns the rule objects
@@ -45,6 +53,11 @@ private:
     std::shared_ptr<RuleFactory> ruleFactory;
 
     bool verbose = true;
+    
+    // Combo storage: owns all combo objects
+    std::vector<std::unique_ptr<Combo>> combos;
+    // Inverted index: ruleID -> combos containing this rule
+    std::unordered_map<int, std::vector<Combo*>> ruleIDToCombos;
     
 
 };

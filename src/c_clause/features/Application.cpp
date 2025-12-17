@@ -13,6 +13,7 @@
 #include "../core/RuleStorage.h"
 #include "../core/Types.h"
 #include "../core/Rule.h"
+#include "../core/Combo.h"
 #include "../core/Globals.h"
 
 
@@ -27,7 +28,7 @@ void ApplicationHandler::calculateTripleScores(std::vector<Triple> triples, Trip
     }
 
 
-    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&);
+    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&);
     SortAndProcessPtr sortAndProcess = nullptr;
 
     if(rank_aggrFunc=="noisyor") {
@@ -85,7 +86,7 @@ void ApplicationHandler::calculateTripleScores(std::vector<Triple> triples, Trip
             std::unordered_map<int, double>& candScores = tripleResults.getCandScores();
             std::vector<std::pair<int, double>> sortedCandScores(candScores.begin(), candScores.end());
             // tie handling, final processing, sorting
-            (this->*sortAndProcess)(sortedCandScores, tripleResults, train);
+            (this->*sortAndProcess)(sortedCandScores, tripleResults, train, rules);
 
             #pragma omp critical
             {  
@@ -116,7 +117,7 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
         predictHeadOrTail = &Rule::predictHeadQuery;
     }
 
-    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&);
+    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&);
     SortAndProcessPtr sortAndProcess = nullptr;
 
     if(rank_aggrFunc=="noisyor") {
@@ -225,7 +226,7 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
             std::vector<std::pair<int, double>> sortedCandScores;
             // tie handling, final processing, sorting
             if (performAggregation){
-                (this->*sortAndProcess)(sortedCandScores, qResults, train);
+                (this->*sortAndProcess)(sortedCandScores, qResults, train, rules);
             }
                     
 
@@ -250,7 +251,7 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
     } //pragma
 }
 
-void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data){
+void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules){
     // noisyor scoring is already performed in QueryResults
 
    std::unordered_map<int, double>& candScores = qResults.getCandScores();
@@ -288,12 +289,12 @@ for (auto& pair: candScoresToSort){
 
 }
 
-void ApplicationHandler::sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data){
-    scoreMaxPlus(qResults.getCandRules(), candScoresToSort, data);
+void ApplicationHandler::sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules){
+    scoreMaxPlus(qResults.getCandRules(), candScoresToSort, data, rules);
 }
 
 // currently not used in the ranking process
-void ApplicationHandler::aggregateQueryResults(std::string direction, TripleStorage& train){
+void ApplicationHandler::aggregateQueryResults(std::string direction, TripleStorage& train, RuleStorage& rules){
     auto& queryResults = (direction=="tail") ? tailQcandsRules : headQcandsRules;
     auto& writeResults = (direction=="tail") ? tailQcandsConfs : headQcandsConfs;
     for (auto& queries: queryResults){
@@ -302,7 +303,7 @@ void ApplicationHandler::aggregateQueryResults(std::string direction, TripleStor
             for (auto& query: srcToCand){
                 int source = query.first; 
                 if (rank_aggrFunc=="maxplus"){
-                    scoreMaxPlus(query.second, writeResults[relation][source], train);
+                    scoreMaxPlus(query.second, writeResults[relation][source], train, rules);
                 }else{
                     throw std::runtime_error("Aggregation function is not recognized in calculate ranking.");
                 }
@@ -452,34 +453,45 @@ void ApplicationHandler::writeRules(TripleStorage& target, std::string filepath,
 }
 
 void ApplicationHandler::scoreMaxPlus(
-    const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train
+    const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train, RuleStorage& rules
      ){
     
     // for noisy-or we can simply sort according to aggrCand after scoring
     // here we have to sort and score separately
     std::vector<std::pair<int, std::vector<Rule*>>> candsToSort(candToRules.begin(), candToRules.end());
 
-    // max+ sorting
-    auto sortLexicographic = [&train, this](const std::pair<int, std::vector<Rule*>>& candA, const std::pair<int, std::vector<Rule*>>& candB) { 
+    // max+ sorting with combo support
+    auto sortLexicographic = [&train, &rules, this](const std::pair<int, std::vector<Rule*>>& candA, const std::pair<int, std::vector<Rule*>>& candB) { 
         std::vector<Rule*> rulesA = candA.second;
         std::vector<Rule*> rulesB = candB.second;
+        
+        // Get max confidence for each candidate (single rule or combo)
+        double maxConfA = 0.0;
+        double maxConfB = 0.0;
+        
+        if (rules.hasCombos()) {
+            maxConfA = findMaxComboConfidence(rulesA, rules);
+            maxConfB = findMaxComboConfidence(rulesB, rules);
+        }
+        
+        // Fall back to single rule max if no combo found
+        if (maxConfA <= 0.0 && !rulesA.empty()) maxConfA = rulesA[0]->getConfidence();
+        if (maxConfB <= 0.0 && !rulesB.empty()) maxConfB = rulesB[0]->getConfidence();
+        
+        if (maxConfA > maxConfB) return true;
+        if (maxConfB > maxConfA) return false;
 
         int minRules = std::min(rulesA.size(), rulesB.size());
         for (int i=0; i<minRules; i++){
             double confA = rulesA[i]->getConfidence();
             double confB = rulesB[i]->getConfidence();
-            if (confA > confB){
-                return true;
-            } else if (confB > confA){
-                return false;
-            }
+            if (confA > confB) return true;
+            else if (confB > confA) return false;
         }
         // all compared rules were equal rank according to num rules
-        if (rulesB.size() > rulesA.size()){
-            return false;
-        } else if (rulesA.size() > rulesB.size()){
-            return true;
-        }
+        if (rulesB.size() > rulesA.size()) return false;
+        else if (rulesA.size() > rulesB.size()) return true;
+        
         //exactly the same rules given NodeToPred is unordered_map return random order
         if (this->rank_tie_handling=="random"){
             return false;
@@ -497,15 +509,58 @@ void ApplicationHandler::scoreMaxPlus(
      std::sort(candsToSort.begin(), candsToSort.end(), sortLexicographic);
     
 
-    // take sorted candidate and derive its score according to highest rule
+    // take sorted candidate and derive its score according to highest confidence (combo or single rule)
      for (auto& pair: candsToSort){
-        aggrCand.push_back(
-            std::make_pair(
-                pair.first,
-                pair.second[0]->getConfidence()
-                )
-            );
+        double maxConf = 0.0;
+        if (rules.hasCombos()) {
+            maxConf = findMaxComboConfidence(pair.second, rules);
+        }
+        if (maxConf <= 0.0 && !pair.second.empty()) {
+            maxConf = pair.second[0]->getConfidence();
+        }
+        aggrCand.push_back(std::make_pair(pair.first, maxConf));
      }
+}
+
+double ApplicationHandler::findMaxComboConfidence(const std::vector<Rule*>& appliedRules, RuleStorage& rules) {
+    if (appliedRules.empty()) return -1.0;
+    
+    auto& ruleIDToCombos = rules.getRuleIDToCombos();
+    if (ruleIDToCombos.empty()) return -1.0;
+    
+    // Step 2: Initialize combo2count
+    std::unordered_map<Combo*, int> combo2count;
+    double bestConf = -1.0;
+    
+    if (comboDebug) {
+        std::cout << "[findMaxCombo] Processing " << appliedRules.size() << " applied rules" << std::endl;
+    }
+    
+    // Step 3: Count combo occurrences
+    for (Rule* rule : appliedRules) {
+        int ruleID = rule->getID();
+        if (ruleIDToCombos.count(ruleID)) {
+            for (Combo* combo : ruleIDToCombos.at(ruleID)) {
+                combo2count[combo]++;
+            }
+        }
+    }
+    
+    // Step 4: Verify complete matches and find best
+    for (const auto& pair : combo2count) {
+        Combo* combo = pair.first;
+        int count = pair.second;
+        if (count == combo->length) {
+            if (comboDebug) {
+                std::cout << "[findMaxCombo] Found complete combo, conf=" << combo->confidence << std::endl;
+            }
+            if (combo->confidence > bestConf) {
+                bestConf = combo->confidence;
+            }
+        }
+    }
+    
+    return bestConf;
 }
 
 void ApplicationHandler::clearAll(){

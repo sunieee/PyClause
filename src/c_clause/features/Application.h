@@ -26,9 +26,9 @@ public:
     void calculateQueryResults(TripleStorage& target, TripleStorage& train, RuleStorage& rules, TripleStorage& addFilter, bool dirIsTail);
     // aggregate query results based on _cfg_ defined aggregation function
     // writes to, e.g., this->headQueryResults[rel][source_entitiy].aggrCand
-    void aggregateQueryResults(std::string direction, TripleStorage& train);
+    void aggregateQueryResults(std::string direction, TripleStorage& train, RuleStorage& rules);
     //aggregation functions
-    void scoreMaxPlus(const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggregatedCand, TripleStorage& train);
+    void scoreMaxPlus(const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggregatedCand, TripleStorage& train, RuleStorage& rules);
     // writes to e.g. this->headQueryResults[rel][head].aggrCand
     void makeRanking(TripleStorage& target, TripleStorage& train, RuleStorage& rules, TripleStorage& addFilter);
     void writeRanking(TripleStorage& target, std::string path);
@@ -88,8 +88,11 @@ private:
     //std::unordered_map<int,std::unordered_map<int, QueryResults>> headQueryResults;
     //std::unordered_map<int,std::unordered_map<int, QueryResults>> tailQueryResults;
 
-    void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data);
-    void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data);
+    void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules);
+    void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules);
+    
+    // Helper function to find max combo confidence
+    double findMaxComboConfidence(const std::vector<Rule*>& appliedRules, RuleStorage& rules);
     
 
 

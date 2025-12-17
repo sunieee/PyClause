@@ -107,6 +107,19 @@ loader:
   xxd_min_preds: -1
   xxd_min_conf: 0.0001
 
+  ## Combo rules
+  # parsable example: "h(X,Y) <= b1(X,Z), b2(Z,Y); b3(X,A), b4(A,Y)"
+  # combines 2-3 rules with semicolon separator
+  # combo confidence must be higher than individual rule confidences
+  load_combo: True
+  combo_debug: False
+  # minimum number of predictions for combo rule (-1 for no filter)
+  combo_min_pred: -1
+  # minimum support (correct predictions) for combo rule (-1 for no filter)
+  combo_min_support: -1
+  # minimum confidence for combo rule
+  combo_min_conf: 0.0001
+
 
 # calculates rankings based on the "target" KG loaded into DataLoader
 # e.g. target argument from loader.load_data(data=.., filter=.., target=..)
