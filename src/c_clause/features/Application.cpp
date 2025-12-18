@@ -456,70 +456,94 @@ void ApplicationHandler::scoreMaxPlus(
     const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train, RuleStorage& rules
      ){
     
-    // for noisy-or we can simply sort according to aggrCand after scoring
-    // here we have to sort and score separately
-    std::vector<std::pair<int, std::vector<Rule*>>> candsToSort(candToRules.begin(), candToRules.end());
-
-    // max+ sorting with combo support
-    auto sortLexicographic = [&train, &rules, this](const std::pair<int, std::vector<Rule*>>& candA, const std::pair<int, std::vector<Rule*>>& candB) { 
-        std::vector<Rule*> rulesA = candA.second;
-        std::vector<Rule*> rulesB = candB.second;
+    // Pre-compute score lists for all candidates
+    std::unordered_map<int, std::vector<double>> candToScoreList;
+    
+    for (const auto& pair : candToRules) {
+        int candidate = pair.first;
+        const std::vector<Rule*>& appliedRules = pair.second;
         
-        // Get max confidence for each candidate (single rule or combo)
-        double maxConfA = 0.0;
-        double maxConfB = 0.0;
+        std::vector<double> scoreList;
         
-        if (rules.hasCombos()) {
-            maxConfA = findMaxComboConfidence(rulesA, rules);
-            maxConfB = findMaxComboConfidence(rulesB, rules);
+        // Step 1: Add all single rule confidences
+        for (Rule* rule : appliedRules) {
+            scoreList.push_back(rule->getConfidence());
         }
         
-        // Fall back to single rule max if no combo found
-        if (maxConfA <= 0.0 && !rulesA.empty()) maxConfA = rulesA[0]->getConfidence();
-        if (maxConfB <= 0.0 && !rulesB.empty()) maxConfB = rulesB[0]->getConfidence();
-        
-        if (maxConfA > maxConfB) return true;
-        if (maxConfB > maxConfA) return false;
-
-        int minRules = std::min(rulesA.size(), rulesB.size());
-        for (int i=0; i<minRules; i++){
-            double confA = rulesA[i]->getConfidence();
-            double confB = rulesB[i]->getConfidence();
-            if (confA > confB) return true;
-            else if (confB > confA) return false;
-        }
-        // all compared rules were equal rank according to num rules
-        if (rulesB.size() > rulesA.size()) return false;
-        else if (rulesA.size() > rulesB.size()) return true;
-        
-        //exactly the same rules given NodeToPred is unordered_map return random order
-        if (this->rank_tie_handling=="random"){
-            return false;
-        }else if (this->rank_tie_handling=="frequency"){
-            if (train.getFreq(candA.first)!=train.getFreq(candB.first)){
-                return train.getFreq(candA.first) > train.getFreq(candB.first);
-            }else{
-                return candA.first<candB.first;
+        // Step 2: Find and add combo confidences if applicable
+        if (rules.hasCombos() && !appliedRules.empty()) {
+            auto& ruleHashToCombos = rules.getRuleHashToCombos();
+            
+            // Build combo2count
+            std::unordered_map<Combo*, int> combo2count;
+            for (Rule* rule : appliedRules) {
+                size_t ruleHash = rule->getRuleHash();
+                if (ruleHashToCombos.count(ruleHash)) {
+                    for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
+                        combo2count[combo]++;
+                    }
+                }
             }
             
+            // Step 3: Add complete combo confidences to scoreList
+            for (const auto& comboPair : combo2count) {
+                Combo* combo = comboPair.first;
+                int count = comboPair.second;
+                if (count == combo->length) {
+                    scoreList.push_back(combo->confidence);
+                }
+            }
+        }
+        
+        // Sort scoreList in descending order for comparison
+        std::sort(scoreList.begin(), scoreList.end(), std::greater<double>());
+        
+        candToScoreList[candidate] = std::move(scoreList);
+    }
+    
+    // Now sort candidates using pre-computed score lists
+    std::vector<std::pair<int, std::vector<Rule*>>> candsToSort(candToRules.begin(), candToRules.end());
+    
+    auto sortLexicographic = [&train, &candToScoreList, this](
+        const std::pair<int, std::vector<Rule*>>& candA, 
+        const std::pair<int, std::vector<Rule*>>& candB) {
+        
+        const std::vector<double>& scoresA = candToScoreList.at(candA.first);
+        const std::vector<double>& scoresB = candToScoreList.at(candB.first);
+        
+        // Compare score lists lexicographically
+        size_t minSize = std::min(scoresA.size(), scoresB.size());
+        for (size_t i = 0; i < minSize; i++) {
+            if (scoresA[i] > scoresB[i]) return true;
+            if (scoresB[i] > scoresA[i]) return false;
+        }
+        
+        // If all compared scores are equal, rank by number of scores
+        if (scoresA.size() > scoresB.size()) return true;
+        if (scoresB.size() > scoresA.size()) return false;
+        
+        // Tie handling for exactly same scores
+        if (this->rank_tie_handling == "random") {
+            return false;
+        } else if (this->rank_tie_handling == "frequency") {
+            if (train.getFreq(candA.first) != train.getFreq(candB.first)) {
+                return train.getFreq(candA.first) > train.getFreq(candB.first);
+            } else {
+                return candA.first < candB.first;
+            }
         } else {
-            throw std::runtime_error("Could not understand tie_handling_paramter in scoreMaxPlus.");
+            throw std::runtime_error("Could not understand tie_handling_parameter in scoreMaxPlus.");
         }
     };
-     std::sort(candsToSort.begin(), candsToSort.end(), sortLexicographic);
     
-
-    // take sorted candidate and derive its score according to highest confidence (combo or single rule)
-     for (auto& pair: candsToSort){
-        double maxConf = 0.0;
-        if (rules.hasCombos()) {
-            maxConf = findMaxComboConfidence(pair.second, rules);
-        }
-        if (maxConf <= 0.0 && !pair.second.empty()) {
-            maxConf = pair.second[0]->getConfidence();
-        }
+    std::sort(candsToSort.begin(), candsToSort.end(), sortLexicographic);
+    
+    // Take sorted candidates and use their highest score
+    for (const auto& pair : candsToSort) {
+        const std::vector<double>& scores = candToScoreList.at(pair.first);
+        double maxConf = scores.empty() ? 0.0 : scores[0];
         aggrCand.push_back(std::make_pair(pair.first, maxConf));
-     }
+    }
 }
 
 double ApplicationHandler::findMaxComboConfidence(const std::vector<Rule*>& appliedRules, RuleStorage& rules) {

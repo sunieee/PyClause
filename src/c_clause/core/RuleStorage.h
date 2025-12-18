@@ -76,8 +76,9 @@ private:
     std::unordered_map<size_t, std::vector<Combo*>> ruleHashToCombos;
     // Debug map: ruleHash -> rule
     std::unordered_map<size_t, Rule*> hashToRule;
-    // Mutex for thread-safe combo index updates
-    std::mutex comboIndexMutex;
+    // Mutex for thread-safe combo operations
+    std::mutex comboMutex;  // Protects combos vector
+    std::mutex comboIndexMutex;  // Protects ruleHashToCombos
 
 };
 

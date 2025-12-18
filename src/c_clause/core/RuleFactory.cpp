@@ -2,6 +2,9 @@
 #include <string>
 #include <cstring>
 #include <cctype>
+#include <set>
+#include <algorithm>
+#include <omp.h>
 
 #include "RuleFactory.h"
 #include "RuleStorage.h"
@@ -845,79 +848,171 @@ void RuleFactory::setComboDebug(bool ind){
 }
 
 void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue) {
-    if (!createCombo || !ruleStorage) return;
+    int threadNum = omp_get_thread_num();
     
-    // Check thresholds
-    if (numPreds > 0 && MminPreds > numPreds) return;
-    if (numTrue > 0 && MminCorrect > numTrue) return;
-    if (numTrue > 0 && ((double)numTrue / (double)numPreds) < MminConf) return;
-    
-    // Split by rule separator "<=", should get head and composite body
-    std::vector<std::string> headBody = util::splitString(rule, _cfg_prs_ruleSeparator);
-    if (headBody.size() != 2) {
-        if (comboDebug) std::cout << "[parseCombo] ERROR: Invalid split, parts: " << headBody.size() << std::endl;
-        throw std::runtime_error("Invalid combo format: " + rule);
-    }
-    
-    std::string headStr = headBody[0];
-    std::string bodiesStr = headBody[1];
-    
-    if (comboDebug) {
-        std::cout << "[parseCombo] Head: " << headStr << std::endl;
-        std::cout << "[parseCombo] Bodies: " << bodiesStr << std::endl;
-    }
-    
-    // Split bodies by semicolon
-    std::vector<std::string> bodyParts = util::splitString(bodiesStr, ";");
-    if (bodyParts.empty() || bodyParts.size() < 2 || bodyParts.size() > 3) {
-        if (comboDebug) std::cout << "[parseCombo] ERROR: Invalid body count: " << bodyParts.size() << std::endl;
-        throw std::runtime_error("Combo must have 2-3 bodies: " + rule);
-    }
-    
-    if (comboDebug) std::cout << "[parseCombo] Found " << bodyParts.size() << " member bodies" << std::endl;
-    
-    // Compute hash for each sub-rule string
-    std::hash<std::string> hasher;
-    std::vector<size_t> memberHashes;
-    
-    // Check if head contains "X,Y" substring to determine if binary
-    bool allBinary = (headStr.find("X,Y") != std::string::npos);
-    
-    for (size_t i = 0; i < bodyParts.size(); ++i) {
-        std::string trimmedBody = bodyParts[i];
-        // Trim whitespace
-        size_t start = trimmedBody.find_first_not_of(" \t");
-        size_t end = trimmedBody.find_last_not_of(" \t");
-        if (start != std::string::npos && end != std::string::npos) {
-            trimmedBody = trimmedBody.substr(start, end - start + 1);
+    try {
+        if (!createCombo || !ruleStorage) {
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Combo creation disabled or no storage" << std::endl;
+            return;
         }
         
-        // Construct full rule string (original format, no parsing)
-        std::string fullRuleStr = headStr + _cfg_prs_ruleSeparator + trimmedBody;
-        size_t ruleHash = hasher(fullRuleStr);
-        memberHashes.push_back(ruleHash);
+        // Check thresholds
+        if (numPreds > 0 && MminPreds > numPreds) {
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Filtered by MminPreds" << std::endl;
+            return;
+        }
+        if (numTrue > 0 && MminCorrect > numTrue) {
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Filtered by MminCorrect" << std::endl;
+            return;
+        }
+        if (numTrue > 0 && ((double)numTrue / (double)numPreds) < MminConf) {
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Filtered by MminConf" << std::endl;
+            return;
+        }
+        
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Processing rule: " << rule << std::endl;
+        
+        // Split by rule separator "<=", should get head and composite body
+        std::vector<std::string> headBody = util::splitString(rule, _cfg_prs_ruleSeparator);
+        if (headBody.size() != 2) {
+            std::cerr << "[parseCombo thread:" << threadNum << "] ERROR: Invalid split, parts: " << headBody.size() << std::endl;
+            std::cerr << "[parseCombo thread:" << threadNum << "] Rule: " << rule << std::endl;
+            throw std::runtime_error("Invalid combo format: " + rule);
+        }
+        
+        std::string headStr = headBody[0];
+        std::string bodiesStr = headBody[1];
         
         if (comboDebug) {
-            std::cout << "[parseCombo] Member " << (i+1) << " fullRuleStr: " << fullRuleStr << std::endl;
-            std::cout << "[parseCombo] Member " << (i+1) << " ruleHash: " << ruleHash << std::endl;
+            std::cout << "[parseCombo thread:" << threadNum << "] Head: " << headStr << std::endl;
+            std::cout << "[parseCombo thread:" << threadNum << "] Bodies: " << bodiesStr << std::endl;
         }
+        
+        // Split bodies by semicolon
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Splitting bodies by semicolon..." << std::endl;
+        
+        std::vector<std::string> bodyParts;
+        try {
+            bodyParts = util::splitString(bodiesStr, ";");
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Split successful, got " << bodyParts.size() << " parts" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[parseCombo thread:" << threadNum << "] ERROR during split: " << e.what() << std::endl;
+            std::cerr << "[parseCombo thread:" << threadNum << "] Bodies string: " << bodiesStr << std::endl;
+            throw;
+        }
+        
+        if (bodyParts.empty() || bodyParts.size() < 2 || bodyParts.size() > 3) {
+            std::cerr << "[parseCombo thread:" << threadNum << "] ERROR: Invalid body count: " << bodyParts.size() << std::endl;
+            std::cerr << "[parseCombo thread:" << threadNum << "] Rule: " << rule << std::endl;
+            throw std::runtime_error("Combo must have 2-3 bodies: " + rule);
+        }
+        
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Found " << bodyParts.size() << " member bodies" << std::endl;
+        
+        // Compute hash for each sub-rule string
+        std::hash<std::string> hasher;
+        std::vector<size_t> memberHashes;
+        
+        // Check if head contains "X,Y" substring to determine if binary
+        bool allBinary = (headStr.find("X,Y") != std::string::npos);
+        
+        for (size_t i = 0; i < bodyParts.size(); ++i) {
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Processing member " << (i+1) << "/" << bodyParts.size() << std::endl;
+            
+            std::string trimmedBody = bodyParts[i];
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Raw body part: " << trimmedBody << std::endl;
+            
+            // Trim whitespace
+            size_t start = trimmedBody.find_first_not_of(" \t");
+            size_t end = trimmedBody.find_last_not_of(" \t");
+            if (start != std::string::npos && end != std::string::npos) {
+                trimmedBody = trimmedBody.substr(start, end - start + 1);
+            }
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Trimmed body: " << trimmedBody << std::endl;
+            
+            // Construct full rule string (original format, no parsing)
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Constructing fullRuleStr..." << std::endl;
+            std::string fullRuleStr;
+            try {
+                fullRuleStr = headStr + _cfg_prs_ruleSeparator + trimmedBody;
+                if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] fullRuleStr constructed successfully" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "[parseCombo thread:" << threadNum << "] ERROR constructing fullRuleStr: " << e.what() << std::endl;
+                throw;
+            }
+            
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Computing hash..." << std::endl;
+            size_t ruleHash;
+            try {
+                ruleHash = hasher(fullRuleStr);
+                if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Hash computed successfully" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "[parseCombo thread:" << threadNum << "] ERROR computing hash: " << e.what() << std::endl;
+                throw;
+            }
+            
+            memberHashes.push_back(ruleHash);
+            
+            if (comboDebug) {
+                std::cout << "[parseCombo thread:" << threadNum << "] Member " << (i+1) << " fullRuleStr: " << fullRuleStr << std::endl;
+                std::cout << "[parseCombo thread:" << threadNum << "] Member " << (i+1) << " ruleHash: " << ruleHash << std::endl;
+            }
+        }
+        
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Creating combo with " << memberHashes.size() << " members" << std::endl;
+        
+        // Create combo
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Allocating Combo object..." << std::endl;
+        auto combo = std::make_unique<Combo>(memberHashes, numTrue, numPreds, allBinary);
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Combo object created" << std::endl;
+        
+        Combo* comboPtr = combo.get();
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Got combo pointer" << std::endl;
+        
+        // Add to storage
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Adding combo to storage..." << std::endl;
+        if (comboDebug) std::cout.flush();
+        try {
+            ruleStorage->addCombo(std::move(combo));
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Combo added to storage" << std::endl;
+            if (comboDebug) std::cout.flush();
+        } catch (const std::exception& e) {
+            std::cerr << "[parseCombo thread:" << threadNum << "] ERROR adding combo to storage: " << e.what() << std::endl;
+            std::cerr.flush();
+            throw;
+        }
+        
+        // Build inverted index: ruleHash -> combo (thread-safe)
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Building inverted index for " << memberHashes.size() << " members..." << std::endl;
+        if (comboDebug) std::cout.flush();
+        for (size_t idx = 0; idx < memberHashes.size(); ++idx) {
+            size_t ruleHash = memberHashes[idx];
+            if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Adding index entry " << (idx+1) << "/" << memberHashes.size() << " (hash: " << ruleHash << ")" << std::endl;
+            if (comboDebug) std::cout.flush();
+            try {
+                ruleStorage->addToComboIndex(ruleHash, comboPtr);
+            } catch (const std::exception& e) {
+                std::cerr << "[parseCombo thread:" << threadNum << "] ERROR adding to combo index: " << e.what() << std::endl;
+                std::cerr.flush();
+                throw;
+            }
+        }
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Inverted index built" << std::endl;
+        if (comboDebug) std::cout.flush();
+        
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Combo created successfully" << std::endl;
+        if (comboDebug) std::cout.flush();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[parseCombo thread:" << threadNum << "] EXCEPTION CAUGHT: " << e.what() << std::endl;
+        std::cerr << "[parseCombo thread:" << threadNum << "] Rule that caused error: " << rule << std::endl;
+        std::cerr << "[parseCombo thread:" << threadNum << "] numPreds: " << numPreds << ", numTrue: " << numTrue << std::endl;
+        throw;  // Re-throw to let caller handle it
+    } catch (...) {
+        std::cerr << "[parseCombo thread:" << threadNum << "] UNKNOWN EXCEPTION CAUGHT" << std::endl;
+        std::cerr << "[parseCombo thread:" << threadNum << "] Rule that caused error: " << rule << std::endl;
+        throw;
     }
-    
-    if (comboDebug) std::cout << "[parseCombo] Creating combo with " << memberHashes.size() << " members" << std::endl;
-    
-    // Create combo
-    auto combo = std::make_unique<Combo>(memberHashes, numTrue, numPreds, allBinary);
-    Combo* comboPtr = combo.get();
-    
-    // Add to storage
-    ruleStorage->addCombo(std::move(combo));
-    
-    // Build inverted index: ruleHash -> combo (thread-safe)
-    for (size_t ruleHash : memberHashes) {
-        ruleStorage->addToComboIndex(ruleHash, comboPtr);
-    }
-    
-    if (comboDebug) std::cout << "[parseCombo] Combo created successfully" << std::endl;
 }
 
 

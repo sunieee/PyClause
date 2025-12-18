@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <unordered_set>
 #include <cctype>
+#include <omp.h>
 
 
 RuleStorage::RuleStorage(std::shared_ptr<Index> index, std::shared_ptr<RuleFactory> ruleFactory){
@@ -159,15 +160,38 @@ std::vector<std::unique_ptr<Rule>>& RuleStorage::getRules(){
  }
 
 void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
-    Combo* comboPtr = combo.get();
+    if (!combo) {
+        std::cerr << "[RuleStorage] ERROR: Trying to add null combo!" << std::endl;
+        std::cerr.flush();
+        throw std::runtime_error("Null combo pointer");
+    }
     
-    // Add to storage first
-    combos.push_back(std::move(combo));
+    // Add to storage with mutex protection
+    try {
+        std::lock_guard<std::mutex> lock(comboMutex);  // Lock for vector access
+        combos.push_back(std::move(combo));
+    } catch (const std::exception& e) {
+        std::cerr << "[RuleStorage] ERROR in addCombo: " << e.what() << std::endl;
+        std::cerr.flush();
+        throw;
+    }
 }
 
 void RuleStorage::addToComboIndex(size_t ruleHash, Combo* combo) {
-    std::lock_guard<std::mutex> lock(comboIndexMutex);
-    ruleHashToCombos[ruleHash].push_back(combo);
+    if (!combo) {
+        std::cerr << "[RuleStorage] ERROR: Null combo pointer in addToComboIndex!" << std::endl;
+        std::cerr.flush();
+        throw std::runtime_error("Null combo pointer");
+    }
+    
+    try {
+        std::lock_guard<std::mutex> lock(comboIndexMutex);
+        ruleHashToCombos[ruleHash].push_back(combo);
+    } catch (const std::exception& e) {
+        std::cerr << "[RuleStorage] ERROR in addToComboIndex: " << e.what() << std::endl;
+        std::cerr.flush();
+        throw;
+    }
 }
 
 void RuleStorage::clearAll(){
