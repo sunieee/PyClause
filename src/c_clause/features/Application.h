@@ -90,10 +90,7 @@ private:
 
     void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules);
     void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules);
-    
-    // Helper function to find max combo confidence
-    double findMaxComboConfidence(const std::vector<Rule*>& appliedRules, RuleStorage& rules);
-    
+
 
 
     // tripleScores the first 3 elements is the triple head,rel,tail the last element is the score

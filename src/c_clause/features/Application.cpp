@@ -458,52 +458,26 @@ void ApplicationHandler::scoreMaxPlus(
     
     // Pre-compute score lists for all candidates
     std::unordered_map<int, std::vector<double>> candToScoreList;
-    
+
     for (const auto& pair : candToRules) {
         int candidate = pair.first;
         const std::vector<Rule*>& appliedRules = pair.second;
         
         std::vector<double> scoreList;
-        
+
         // Step 1: Add all single rule confidences
         for (Rule* rule : appliedRules) {
             scoreList.push_back(rule->getConfidence());
         }
-        
-        // Step 2: Find and add combo confidences if applicable
-        if (rules.hasCombos() && !appliedRules.empty()) {
-            auto& ruleHashToCombos = rules.getRuleHashToCombos();
-            
-            // Build combo2count
-            std::unordered_map<Combo*, int> combo2count;
-            for (Rule* rule : appliedRules) {
-                size_t ruleHash = rule->getRuleHash();
-                if (ruleHashToCombos.count(ruleHash)) {
-                    for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
-                        combo2count[combo]++;
-                    }
-                }
-            }
-            
-            // Step 3: Add complete combo confidences to scoreList
-            for (const auto& comboPair : combo2count) {
-                Combo* combo = comboPair.first;
-                int count = comboPair.second;
-                if (count == combo->length) {
-                    scoreList.push_back(combo->confidence);
-                }
-            }
-        }
-        
         // Sort scoreList in descending order for comparison
         std::sort(scoreList.begin(), scoreList.end(), std::greater<double>());
         
         candToScoreList[candidate] = std::move(scoreList);
     }
-    
+
     // Now sort candidates using pre-computed score lists
     std::vector<std::pair<int, std::vector<Rule*>>> candsToSort(candToRules.begin(), candToRules.end());
-    
+
     auto sortLexicographic = [&train, &candToScoreList, this](
         const std::pair<int, std::vector<Rule*>>& candA, 
         const std::pair<int, std::vector<Rule*>>& candB) {
@@ -545,48 +519,6 @@ void ApplicationHandler::scoreMaxPlus(
         aggrCand.push_back(std::make_pair(pair.first, maxConf));
     }
 }
-
-double ApplicationHandler::findMaxComboConfidence(const std::vector<Rule*>& appliedRules, RuleStorage& rules) {
-    if (appliedRules.empty()) return -1.0;
-    
-    auto& ruleHashToCombos = rules.getRuleHashToCombos();
-    if (ruleHashToCombos.empty()) return -1.0;
-    
-    // Step 2: Initialize combo2count
-    std::unordered_map<Combo*, int> combo2count;
-    double bestConf = -1.0;
-    
-    // if (comboDebug) {
-    //     std::cout << "[findMaxCombo] Processing " << appliedRules.size() << " applied rules" << std::endl;
-    // }
-    
-    // Step 3: Count combo occurrences using rule hash
-    for (Rule* rule : appliedRules) {
-        size_t ruleHash = rule->getRuleHash();
-        if (ruleHashToCombos.count(ruleHash)) {
-            for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
-                combo2count[combo]++;
-            }
-        }
-    }
-    
-    // Step 4: Verify complete matches and find best
-    for (const auto& pair : combo2count) {
-        Combo* combo = pair.first;
-        int count = pair.second;
-        if (count == combo->length) {
-            if (comboDebug) {
-                std::cout << "[findMaxCombo] Processing " << appliedRules.size() << " applied rules. Found complete combo, conf=" << combo->confidence << std::endl;
-            }
-            if (combo->confidence > bestConf) {
-                bestConf = combo->confidence;
-            }
-        }
-    }
-    
-    return bestConf;
-}
-
 
 void ApplicationHandler::clearAll(){
     headQcandsRules.clear();
