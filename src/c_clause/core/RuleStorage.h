@@ -16,18 +16,31 @@ class RuleStorage
 
 public:
     RuleStorage(std::shared_ptr<Index> index, std::shared_ptr<RuleFactory> ruleFactory);
-    // expects a file with lines val\tval\t\val\trulestring
-    //if sampled the first 3 values in a ruleset refer to sampled values
-    void readAnyTimeFormat(std::string path, bool exact); 
-    void readAnyTimeFromVec(std::vector<std::string>& stringLines, bool exact);
-    void readAnyTimeFromVecs(std::vector<std::string>& ruleStrings, std::vector<std::pair<int,int>> stats, bool exact); 
-
-    // ruleLine is num_pred /t support /t conf /t ruleString
-    bool addAnyTimeRuleLine(std::string ruleLine, int id, bool exact);
-
+    
+    // Main loading function - expects a file with lines: numPred\tnumTrue\tconf\trulestring
     void readAnyTimeParFormat(std::string path, bool exact, int numThreads);
+    
+    // Deprecated functions - throw not implemented error
+    void readAnyTimeFormat(std::string path, bool exact) {
+        throw std::runtime_error("readAnyTimeFormat is deprecated. Please use readAnyTimeParFormat instead.");
+    }
+    
+    void readAnyTimeFromVec(std::vector<std::string>& stringLines, bool exact) {
+        throw std::runtime_error("readAnyTimeFromVec is deprecated. Please use readAnyTimeParFormat instead.");
+    }
+    
+    void readAnyTimeFromVecs(std::vector<std::string>& ruleStrings, std::vector<std::pair<int,int>> stats, bool exact) {
+        throw std::runtime_error("readAnyTimeFromVecs is deprecated. Please use readAnyTimeParFormat instead.");
+    }
+    
+    bool addAnyTimeRuleLine(std::string ruleLine, int id, bool exact) {
+        throw std::runtime_error("addAnyTimeRuleLine is deprecated and not implemented.");
+    }
+    
+    bool addAnyTimeRuleWithStats(std::string ruleString, int id, int numPred, int numTrue, bool exact) {
+        throw std::runtime_error("addAnyTimeRuleWithStats is deprecated and not implemented.");
+    }
 
-    bool addAnyTimeRuleWithStats(std::string ruleString, int id, int numPred, int numTrue, bool exact);
     std::vector<std::unique_ptr<Rule>>& getRules();
     std::unordered_map<int, std::set<Rule*,compareRule>>& getRelToRules();
     std::set<Rule*, compareRule>& getRelRules(int relation);
@@ -42,7 +55,6 @@ public:
     // Print loading statistics
     void printStatistics();
     
-
 private:
     // rules owns the rule objects
     // RelToRules keeps the rules sorted due to the set, iterating over all the rules would

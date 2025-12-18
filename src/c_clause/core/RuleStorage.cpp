@@ -20,41 +20,6 @@ RuleStorage::RuleStorage(std::shared_ptr<Index> index, std::shared_ptr<RuleFacto
 }
 
 
-// reads format outputted by AnyBURL
-void RuleStorage::readAnyTimeFormat(std::string path, bool exact){
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        throw std::ios_base::failure("Could not open rule file: " + path + " is the path correct?");
-    }
-
-    if (verbose){
-        std::cout << "Loading rules from " + path << std::endl;
-    }
-
-    std::ios_base::sync_with_stdio(false); 
-    
-    constexpr size_t bufferSize =  256 * 1024; 
-    char buffer[bufferSize];
-    file.rdbuf()->pubsetbuf(buffer, bufferSize);
-
-    std::string line;
-    int currID = 0;
-    int currLine = 0;
-    
-    while (!util::safeGetline(file, line).eof()){
-        if (currLine % 1000000 == 0 && verbose && currLine > 0){
-            std::cout << "...parsed " << currLine << " rules " << std::endl;
-        }
-        bool added = addAnyTimeRuleLine(line, currID, false);
-        if (added){
-            currID += 1;
-        }
-        currLine += 1;
-    }
-    std::cout << "Loaded " << currID << " rules." << std::endl;
-    printStatistics();
-}
-
 void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThreads){
      std::ifstream file(path);
     if (!file.is_open()) {
@@ -85,6 +50,8 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
 
     // we not need all of them 
     rules_ptr.resize(ruleLines.size());
+    std::vector<std::string> ruleStrings_vec(ruleLines.size());
+    std::vector<size_t> ruleHashes_vec(ruleLines.size());
 
     #pragma omp parallel num_threads(numThreads)
     {
@@ -115,6 +82,15 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             std::string ruleString = splitline[3];
             int numPreds = std::stoi(splitline[0]);
             int numTrue = std::stoi(splitline[1]);
+            
+            // Store rule string for later collection
+            ruleStrings_vec[i] = ruleString;
+            
+            // Compute hash for the rule string
+            std::hash<std::string> hasher;
+            size_t ruleHash = hasher(ruleString);
+            ruleHashes_vec[i] = ruleHash;
+            
             std::unique_ptr<Rule> rule = nullptr;
             try
                 {
@@ -130,6 +106,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
 
             if (rule){
                 rule->setStats(numPreds, numTrue, exact);
+                rule->setRuleHash(ruleHash);
                 rules_ptr.at(i) = std::move(rule);              
             }
         }
@@ -139,9 +116,26 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
     // to be consistent when rules are written and loaded again
     std::cout<< "Indexing rules.." <<std::endl;
     int currID = 0;
+    std::unordered_set<size_t> seenHashes;
+    
     for (int i=0; i<rules_ptr.size(); i++){
         if (rules_ptr[i]){
+            size_t ruleHash = ruleHashes_vec[i];
+            
+            // Check for duplicate rules using hash
+            if (seenHashes.find(ruleHash) != seenHashes.end()) {
+                std::cerr << "ERROR: Duplicate rule detected!" << std::endl;
+                std::cerr << "Rule ID: " << currID << std::endl;
+                std::cerr << "Rule: " << ruleStrings_vec[i] << std::endl;
+                throw std::runtime_error("Duplicate rule in RuleStorage");
+            }
+            seenHashes.insert(ruleHash);
+            
             rules_ptr[i]->setID(currID);
+            
+            // Store for debugging: hash to rule mapping
+            hashToRule[ruleHash] = rules_ptr[i].get();
+            
             // must be done after id is set
             relToRules[rules_ptr[i]->getTargetRel()].insert(rules_ptr[i].get());
             currID += 1;
@@ -152,103 +146,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
     printStatistics();
 }
 
-// ruleStrings is a line num_pred/t support/t conf/t ruleString
-void RuleStorage::readAnyTimeFromVec(std::vector<std::string>& ruleStrings, bool exact){
-    int currID = 0;
-    for (int i=0; i<ruleStrings.size(); i++){
-         if (i%1000000==0 && verbose && i>0){
-                std::cout<<"...serialized "<<i<<" rules "<<std::endl;
-        }
-        std::string stringLine = ruleStrings[i];
-        bool added = addAnyTimeRuleLine(stringLine, currID, exact);
-        if (added){
-            currID += 1;
-        }
-    }
-    std::cout<<"Loaded "<<currID<<" rules."<<std::endl;
-    printStatistics();
-} 
-
-void RuleStorage::readAnyTimeFromVecs(std::vector<std::string>& ruleStrings, std::vector<std::pair<int,int>> stats, bool exact){
-    if (ruleStrings.size() != stats.size()){
-        throw std::runtime_error(
-            "The rule stats input list must have same length of rule string list when loading rules with stats."
-        );
-    }
-    int currID = 0;
-    for (int i=0; i<ruleStrings.size(); i++){
-        if (i%1000000==0 && verbose && i>0){
-                std::cout<<"...serialized "<<i<<" rules "<<std::endl;
-        }
-        std::string stringRule = ruleStrings[i];
-        int numPred = stats[i].first;
-        int numTrue = stats[i].second;
-        bool added = addAnyTimeRuleWithStats(stringRule, currID, numPred, numTrue, exact);
-        if (added){
-            currID += 1;
-        }
-    }
-    std::cout<<"Loaded "<<currID<<" rules."<<std::endl;
-    printStatistics();
-
-}
-
-bool RuleStorage::addAnyTimeRuleLine(std::string ruleLine, int id , bool exact){
-    // expects a line: predicted\t cpredicted\tconf\trulestring
-	std::vector<std::string> splitline = util::split(ruleLine, '\t');
-
-    if (splitline.size()==1){
-        int numPreds = 100;
-        int numTrue = 100;
-        std::cout<<"Warning: could not find num preds and support for input line " + splitline[0]<<std::endl;
-        std::cout<<" Setting both to 100. Expect random ordering for rules and predictions, confidence scores will all be 1."<<std::endl;
-        return addAnyTimeRuleWithStats(splitline[0], id, numPreds, numTrue, exact);
-    }
-
-    if (splitline.size()!=4){
-        throw std::runtime_error("Could not parse this rule because of format: " + ruleLine);
-    }
-    std::string ruleString = splitline[3];
-    int numPreds = std::stoi(splitline[0]);
-    int numTrue = std::stoi(splitline[1]);
-
-    return addAnyTimeRuleWithStats(ruleString, id, numPreds, numTrue, exact);
-}
-
-bool RuleStorage::addAnyTimeRuleWithStats(std::string ruleString, int id, int numPred, int numTrue, bool exact){
-    std::unique_ptr<Rule> rule = ruleFactory->parseAnytimeRule(ruleString, numPred, numTrue);
-    if (rule){
-        int targetRel = rule->getTargetRel();
-        std::hash<std::string> hasher;
-        size_t ruleHash = hasher(ruleString);
-        
-        // Check for duplicate rules using hash
-        for (Rule* existingRule : relToRules[targetRel]) {
-            if (existingRule->getRuleHash() == ruleHash) {
-                std::cerr << "ERROR: Duplicate rule detected!" << std::endl;
-                std::cerr << "Existing Rule ID: " << existingRule->getID() << std::endl;
-                std::cerr << "New Rule ID: " << id << std::endl;
-                std::cerr << "Rule: " << ruleString << std::endl;
-                throw std::runtime_error("Duplicate rule in RuleStorage");
-            }
-        }
-        
-        rule->setID(id);
-        rule->setStats(numPred, numTrue, exact);
-        rule->setRuleHash(ruleHash);
-        
-        // Store for debugging: normalized string and original string separately
-        hashToRule[ruleHash] = rule.get();
-        
-        relToRules[rule->getTargetRel()].insert(rule.get());
-        rules.push_back(std::move(rule));
-        return true;
-    } else {
-        return false;
-    }
-}
-
-std::set<Rule*, compareRule>&  RuleStorage::getRelRules(int relation){
+std::set<Rule*, compareRule>& RuleStorage::getRelRules(int relation){
     return relToRules[relation];
 }
 
