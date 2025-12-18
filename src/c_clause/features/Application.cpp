@@ -525,22 +525,22 @@ void ApplicationHandler::scoreMaxPlus(
 double ApplicationHandler::findMaxComboConfidence(const std::vector<Rule*>& appliedRules, RuleStorage& rules) {
     if (appliedRules.empty()) return -1.0;
     
-    auto& ruleIDToCombos = rules.getRuleIDToCombos();
-    if (ruleIDToCombos.empty()) return -1.0;
+    auto& ruleHashToCombos = rules.getRuleHashToCombos();
+    if (ruleHashToCombos.empty()) return -1.0;
     
     // Step 2: Initialize combo2count
     std::unordered_map<Combo*, int> combo2count;
     double bestConf = -1.0;
     
-    if (comboDebug) {
-        std::cout << "[findMaxCombo] Processing " << appliedRules.size() << " applied rules" << std::endl;
-    }
+    // if (comboDebug) {
+    //     std::cout << "[findMaxCombo] Processing " << appliedRules.size() << " applied rules" << std::endl;
+    // }
     
-    // Step 3: Count combo occurrences
+    // Step 3: Count combo occurrences using rule hash
     for (Rule* rule : appliedRules) {
-        int ruleID = rule->getID();
-        if (ruleIDToCombos.count(ruleID)) {
-            for (Combo* combo : ruleIDToCombos.at(ruleID)) {
+        size_t ruleHash = rule->getRuleHash();
+        if (ruleHashToCombos.count(ruleHash)) {
+            for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
                 combo2count[combo]++;
             }
         }
@@ -552,7 +552,7 @@ double ApplicationHandler::findMaxComboConfidence(const std::vector<Rule*>& appl
         int count = pair.second;
         if (count == combo->length) {
             if (comboDebug) {
-                std::cout << "[findMaxCombo] Found complete combo, conf=" << combo->confidence << std::endl;
+                std::cout << "[findMaxCombo] Processing " << appliedRules.size() << " applied rules. Found complete combo, conf=" << combo->confidence << std::endl;
             }
             if (combo->confidence > bestConf) {
                 bestConf = combo->confidence;
@@ -562,6 +562,7 @@ double ApplicationHandler::findMaxComboConfidence(const std::vector<Rule*>& appl
     
     return bestConf;
 }
+
 
 void ApplicationHandler::clearAll(){
     headQcandsRules.clear();

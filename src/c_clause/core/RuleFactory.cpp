@@ -1,6 +1,7 @@
 
 #include <string>
 #include <cstring>
+#include <cctype>
 
 #include "RuleFactory.h"
 #include "RuleStorage.h"
@@ -875,8 +876,13 @@ void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue) {
     
     if (comboDebug) std::cout << "[parseCombo] Found " << bodyParts.size() << " member bodies" << std::endl;
     
-    // Parse each sub-rule
-    std::vector<Rule*> memberRules;
+    // Compute hash for each sub-rule string
+    std::hash<std::string> hasher;
+    std::vector<size_t> memberHashes;
+    
+    // Check if head contains "X,Y" substring to determine if binary
+    bool allBinary = (headStr.find("X,Y") != std::string::npos);
+    
     for (size_t i = 0; i < bodyParts.size(); ++i) {
         std::string trimmedBody = bodyParts[i];
         // Trim whitespace
@@ -886,21 +892,30 @@ void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue) {
             trimmedBody = trimmedBody.substr(start, end - start + 1);
         }
         
-        if (comboDebug) std::cout << "[parseCombo] Processing member body " << (i+1) << ": " << trimmedBody << std::endl;
+        // Construct full rule string (original format, no parsing)
+        std::string fullRuleStr = headStr + _cfg_prs_ruleSeparator + trimmedBody;
+        size_t ruleHash = hasher(fullRuleStr);
+        memberHashes.push_back(ruleHash);
         
-        Rule* rule = ruleStorage->findRuleByString(headStr, trimmedBody);
-        memberRules.push_back(rule);
+        if (comboDebug) {
+            std::cout << "[parseCombo] Member " << (i+1) << " fullRuleStr: " << fullRuleStr << std::endl;
+            std::cout << "[parseCombo] Member " << (i+1) << " ruleHash: " << ruleHash << std::endl;
+        }
     }
     
-    // Sort by rule ID
-    std::sort(memberRules.begin(), memberRules.end(), 
-              [](Rule* a, Rule* b) { return a->getID() < b->getID(); });
+    if (comboDebug) std::cout << "[parseCombo] Creating combo with " << memberHashes.size() << " members" << std::endl;
     
-    if (comboDebug) std::cout << "[parseCombo] Creating combo with " << memberRules.size() << " members" << std::endl;
+    // Create combo
+    auto combo = std::make_unique<Combo>(memberHashes, numTrue, numPreds, allBinary);
+    Combo* comboPtr = combo.get();
     
-    // Create combo and add to storage
-    auto combo = std::make_unique<Combo>(memberRules, numTrue, numPreds);
+    // Add to storage
     ruleStorage->addCombo(std::move(combo));
+    
+    // Build inverted index: ruleHash -> combo (thread-safe)
+    for (size_t ruleHash : memberHashes) {
+        ruleStorage->addToComboIndex(ruleHash, comboPtr);
+    }
     
     if (comboDebug) std::cout << "[parseCombo] Combo created successfully" << std::endl;
 }

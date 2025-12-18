@@ -7,6 +7,9 @@
 
 #include <fstream>
 #include <string>
+#include <iomanip>
+#include <unordered_set>
+#include <cctype>
 
 
 RuleStorage::RuleStorage(std::shared_ptr<Index> index, std::shared_ptr<RuleFactory> ruleFactory){
@@ -49,6 +52,7 @@ void RuleStorage::readAnyTimeFormat(std::string path, bool exact){
         currLine += 1;
     }
     std::cout << "Loaded " << currID << " rules." << std::endl;
+    printStatistics();
 }
 
 void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThreads){
@@ -145,6 +149,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
         }
     }
     std::cout<<"Loaded and indexed "<<currID<<" rules."<<std::endl;
+    printStatistics();
 }
 
 // ruleStrings is a line num_pred/t support/t conf/t ruleString
@@ -161,6 +166,7 @@ void RuleStorage::readAnyTimeFromVec(std::vector<std::string>& ruleStrings, bool
         }
     }
     std::cout<<"Loaded "<<currID<<" rules."<<std::endl;
+    printStatistics();
 } 
 
 void RuleStorage::readAnyTimeFromVecs(std::vector<std::string>& ruleStrings, std::vector<std::pair<int,int>> stats, bool exact){
@@ -183,6 +189,7 @@ void RuleStorage::readAnyTimeFromVecs(std::vector<std::string>& ruleStrings, std
         }
     }
     std::cout<<"Loaded "<<currID<<" rules."<<std::endl;
+    printStatistics();
 
 }
 
@@ -211,23 +218,28 @@ bool RuleStorage::addAnyTimeRuleLine(std::string ruleLine, int id , bool exact){
 bool RuleStorage::addAnyTimeRuleWithStats(std::string ruleString, int id, int numPred, int numTrue, bool exact){
     std::unique_ptr<Rule> rule = ruleFactory->parseAnytimeRule(ruleString, numPred, numTrue);
     if (rule){
-        // Check for duplicate rules
-        std::string newRuleStr = rule->computeRuleString(index.get());
         int targetRel = rule->getTargetRel();
+        std::hash<std::string> hasher;
+        size_t ruleHash = hasher(ruleString);
         
+        // Check for duplicate rules using hash
         for (Rule* existingRule : relToRules[targetRel]) {
-            std::string existingStr = existingRule->computeRuleString(index.get());
-            if (existingStr == newRuleStr) {
+            if (existingRule->getRuleHash() == ruleHash) {
                 std::cerr << "ERROR: Duplicate rule detected!" << std::endl;
                 std::cerr << "Existing Rule ID: " << existingRule->getID() << std::endl;
                 std::cerr << "New Rule ID: " << id << std::endl;
-                std::cerr << "Rule: " << newRuleStr << std::endl;
+                std::cerr << "Rule: " << ruleString << std::endl;
                 throw std::runtime_error("Duplicate rule in RuleStorage");
             }
         }
         
         rule->setID(id);
         rule->setStats(numPred, numTrue, exact);
+        rule->setRuleHash(ruleHash);
+        
+        // Store for debugging: normalized string and original string separately
+        hashToRule[ruleHash] = rule.get();
+        
         relToRules[rule->getTargetRel()].insert(rule.get());
         rules.push_back(std::move(rule));
         return true;
@@ -235,25 +247,6 @@ bool RuleStorage::addAnyTimeRuleWithStats(std::string ruleString, int id, int nu
         return false;
     }
 }
-
-Rule* RuleStorage::findRuleByString(const std::string& headStr, const std::string& bodyStr) {
-    // Parse head to get target relation
-    strAtom headAtom;
-    ruleFactory->parseAtom(headStr, headAtom);
-    int targetRel = index->getIdOfRelationstring(headAtom[0]);
-    
-    // Search in rules for this relation
-    std::string fullRuleStr = headStr + _cfg_prs_ruleSeparator + bodyStr;
-    
-    for (Rule* rule : relToRules[targetRel]) {
-        std::string existingRuleStr = rule->computeRuleString(index.get());
-        if (existingRuleStr == fullRuleStr) return rule;
-    }
-    
-    // Rule not found
-    throw std::runtime_error("Cannot find rule for combo member: " + fullRuleStr);
-}
-
 
 std::set<Rule*, compareRule>&  RuleStorage::getRelRules(int relation){
     return relToRules[relation];
@@ -270,18 +263,101 @@ std::vector<std::unique_ptr<Rule>>& RuleStorage::getRules(){
 void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
     Combo* comboPtr = combo.get();
     
-    // Add to storage
+    // Add to storage first
     combos.push_back(std::move(combo));
-    
-    // Build inverted index
-    for (Rule* rule : comboPtr->memberRules) {
-        ruleIDToCombos[rule->getID()].push_back(comboPtr);
-    }
+}
+
+void RuleStorage::addToComboIndex(size_t ruleHash, Combo* combo) {
+    std::lock_guard<std::mutex> lock(comboIndexMutex);
+    ruleHashToCombos[ruleHash].push_back(combo);
 }
 
 void RuleStorage::clearAll(){
     rules.clear();
     relToRules.clear();
     combos.clear();
-    ruleIDToCombos.clear();
+    ruleHashToCombos.clear();
+}
+
+void RuleStorage::printStatistics() {
+    // Count rules by type
+    std::unordered_map<std::string, int> ruleTypeCounts;
+    for (const auto& rule : rules) {
+        std::string type(rule->type);
+        ruleTypeCounts[type]++;
+    }
+    
+    std::cout << "\n========== Rule Loading Statistics ==========" << std::endl;
+    std::cout << "Regular Rules:" << std::endl;
+    std::cout << "  Total: " << rules.size() << std::endl;
+    for (const auto& pair : ruleTypeCounts) {
+        std::cout << "  " << pair.first << ": " << pair.second << std::endl;
+    }
+    
+    // Count combos by length and type
+    if (!combos.empty()) {
+        int len2_unary = 0, len2_binary = 0;
+        int len3_unary = 0, len3_binary = 0;
+        
+        for (const auto& combo : combos) {
+            if (combo->length == 2) {
+                if (combo->isBinary) len2_binary++;
+                else len2_unary++;
+            } else if (combo->length == 3) {
+                if (combo->isBinary) len3_binary++;
+                else len3_unary++;
+            }
+        }
+        
+        std::cout << "\nCombo Rules:" << std::endl;
+        std::cout << "  Total: " << combos.size() << std::endl;
+        std::cout << "\n  Distribution (Length × Type):" << std::endl;
+        std::cout << "                Unary    Binary" << std::endl;
+        std::cout << "    Length 2:  " << std::setw(6) << len2_unary << "   " << std::setw(6) << len2_binary << std::endl;
+        std::cout << "    Length 3:  " << std::setw(6) << len3_unary << "   " << std::setw(6) << len3_binary << std::endl;
+        
+        // Check if all rule hashes in combos have corresponding rules
+        std::cout << "\n  Validating combo rule references..." << std::endl;
+        std::unordered_map<size_t, std::string> allRuleHashes;
+        for (const auto& rule : rules) {
+            size_t hash = rule->getRuleHash();
+            std::string ruleStr = rule->computeRuleString(index.get());
+            allRuleHashes[hash] = ruleStr;
+        }
+        
+        std::unordered_set<size_t> missingHashes;
+        int totalReferences = 0;
+        for (const auto& pair : ruleHashToCombos) {
+            totalReferences++;
+            if (allRuleHashes.find(pair.first) == allRuleHashes.end()) {
+                missingHashes.insert(pair.first);
+            }
+        }
+        
+        if (missingHashes.empty()) {
+            std::cout << "  ✓ All " << totalReferences << " rule references are valid" << std::endl;
+        } else {
+            std::cout << "  ⚠ WARNING: Found " << missingHashes.size() << " missing rule references!" << std::endl;
+            std::cout << "\n  Sample of missing rules (first 5):" << std::endl;
+            int count = 0;
+            for (size_t hash : missingHashes) {
+                if (count++ < 5) {
+                    std::cout << "    Hash " << hash << ":" << std::endl;
+                    auto rule = hashToRule.find(hash);
+                    if (rule != hashToRule.end()) {
+                        std::cout << "      computeRuleString: " << rule->second->computeRuleString(index.get()) << std::endl;
+                        std::cout << "      haser(computeRuleString): " << std::hash<std::string>{}(rule->second->computeRuleString(index.get())) << std::endl;
+                        std::cout << "      ruleString: " << rule->second->rulestring << std::endl;
+                        std::cout << "      haser(ruleString): " << std::hash<std::string>{}(rule->second->rulestring) << std::endl;
+
+                    }
+                } else {
+                    std::cout << "    ... (and " << (missingHashes.size() - 5) << " more)" << std::endl;
+                    break;
+                }
+            }
+        }
+    }
+    
+    std::cout << "============================================\n" << std::endl;
 }

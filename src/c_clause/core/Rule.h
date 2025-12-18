@@ -82,6 +82,10 @@ public:
 	void setNumUnseen(int val);
 	void setBranchingFactor(int val);
 	int getBranchingFactor();
+	
+	// Hash of rule string (for combo rule identification)
+	size_t getRuleHash() const { return ruleHash; }
+	void setRuleHash(size_t hash) { ruleHash = hash; }
 
 	// only used for Uxxd Uxxc rules when particularly parsed from Anyburl rule files
 	virtual void setPredictHead(bool ind);
@@ -90,6 +94,7 @@ public:
 	bool predictHead;
 	bool predictTail;
 	const char* type;
+	std::string rulestring;
 	
 protected:
 	int ID;
@@ -100,6 +105,8 @@ protected:
 	// correctly predicted
 	int cpredicted;
 	long long bodyhash;
+	// Hash of the rule string (for combo identification)
+	size_t ruleHash;
 	// possibly sampled confidence metrics
 	int sampledPredicted;
 	int sampledCpredicted;
@@ -112,7 +119,6 @@ protected:
 	// track exact num(correct)predicted when running materialize
 	bool trackInMaterialize;
 
-	std::string rulestring;
 	// internal rule representation
 	// see child classes
 	std::vector<int> relations;

@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <memory>
+#include <mutex>
 
 class RuleStorage
 {
@@ -33,10 +34,13 @@ public:
     void clearAll();
     
     // Combo-related methods
-    Rule* findRuleByString(const std::string& headStr, const std::string& bodyStr);
     void addCombo(std::unique_ptr<Combo> combo);
-    std::unordered_map<int, std::vector<Combo*>>& getRuleIDToCombos() { return ruleIDToCombos; }
+    void addToComboIndex(size_t ruleHash, Combo* combo);
+    std::unordered_map<size_t, std::vector<Combo*>>& getRuleHashToCombos() { return ruleHashToCombos; }
     bool hasCombos() const { return !combos.empty(); }
+    
+    // Print loading statistics
+    void printStatistics();
     
 
 private:
@@ -56,9 +60,12 @@ private:
     
     // Combo storage: owns all combo objects
     std::vector<std::unique_ptr<Combo>> combos;
-    // Inverted index: ruleID -> combos containing this rule
-    std::unordered_map<int, std::vector<Combo*>> ruleIDToCombos;
-    
+    // Inverted index: ruleHash -> combos containing this rule
+    std::unordered_map<size_t, std::vector<Combo*>> ruleHashToCombos;
+    // Debug map: ruleHash -> rule
+    std::unordered_map<size_t, Rule*> hashToRule;
+    // Mutex for thread-safe combo index updates
+    std::mutex comboIndexMutex;
 
 };
 
