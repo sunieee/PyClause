@@ -461,14 +461,44 @@ void ApplicationHandler::scoreMaxPlus(
 
     for (const auto& pair : candToRules) {
         int candidate = pair.first;
-        const std::vector<Rule*>& appliedRules = pair.second;
+        std::vector<Rule*> appliedRules = pair.second;
         
         std::vector<double> scoreList;
 
-        // Step 1: Add all single rule confidences
+        // Step 1: Sort applied rules by confidence (descending)
+        std::sort(appliedRules.begin(), appliedRules.end(), 
+            [](Rule* a, Rule* b) { return a->getConfidence() > b->getConfidence(); });
+        
+        // Step 2: Build scoreList with single rule confidences (already sorted)
         for (Rule* rule : appliedRules) {
             scoreList.push_back(rule->getConfidence());
         }
+        
+        // Step 2: Find and add combo confidences if applicable
+        auto findCombo = [&](int topK = 1) {
+            auto& ruleHashToCombos = rules.getRuleHashToCombos();
+            int addedCombos = 0;
+            
+            // Build combo2count
+            std::unordered_map<Combo*, int> combo2count;
+            for (Rule* rule : appliedRules) {
+                size_t ruleHash = rule->getRuleHash();
+                if (ruleHashToCombos.count(ruleHash)) {
+                    for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
+                        combo2count[combo]++;
+                        if (combo2count[combo] == combo->length) {
+                            // All rules in combo have been applied; add combo confidence
+                            scoreList.push_back(combo->confidence);
+                            addedCombos++;
+                            if (addedCombos >= topK) return; 
+                        }
+                    }
+                }
+            }
+        };
+        
+        if (rules.hasCombos() && !appliedRules.empty()) findCombo(1);
+        
         // Sort scoreList in descending order for comparison
         std::sort(scoreList.begin(), scoreList.end(), std::greater<double>());
         
