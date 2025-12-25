@@ -238,28 +238,49 @@ void RuleStorage::printStatistics() {
         std::cout << "    Length 2:  " << std::setw(6) << len2_unary << "   " << std::setw(6) << len2_binary << std::endl;
         std::cout << "    Length 3:  " << std::setw(6) << len3_unary << "   " << std::setw(6) << len3_binary << std::endl;
         
-        // Check if all rule hashes in combos have corresponding rules
+        // ========== Validate ruleHashToCombos ==========
+        std::cout << "\n  Analyzing ruleHashToCombos mapping..." << std::endl;
+        std::cout << "  Total unique rule hashes in ruleHashToCombos: " << ruleHashToCombos.size() << std::endl;
+        
+        // Count total combo references
+        int totalComboReferences = 0;
+        int maxCombosPerRule = 0;
+        size_t hashWithMostCombos = 0;
+        for (const auto& pair : ruleHashToCombos) {
+            int comboCount = pair.second.size();
+            totalComboReferences += comboCount;
+            if (comboCount > maxCombosPerRule) {
+                maxCombosPerRule = comboCount;
+                hashWithMostCombos = pair.first;
+            }
+        }
+        std::cout << "  Total combo references: " << totalComboReferences << std::endl;
+        std::cout << "  Average combos per rule: " << (totalComboReferences / (double)ruleHashToCombos.size()) << std::endl;
+        std::cout << "  Max combos for single rule: " << maxCombosPerRule << " (hash=" << hashWithMostCombos << ")" << std::endl;
+        
+        // Check if all rule hashes in ruleHashToCombos have corresponding rules
         std::cout << "\n  Validating combo rule references..." << std::endl;
         std::unordered_map<size_t, std::string> allRuleHashes;
         for (const auto& rule : rules) {
             size_t hash = rule->getRuleHash();
-            std::string ruleStr = rule->computeRuleString(index.get());
-            allRuleHashes[hash] = ruleStr;
+            allRuleHashes[hash] = rule->rulestring;
         }
         
         std::unordered_set<size_t> missingHashes;
-        int totalReferences = 0;
+        int validReferences = 0;
         for (const auto& pair : ruleHashToCombos) {
-            totalReferences++;
             if (allRuleHashes.find(pair.first) == allRuleHashes.end()) {
                 missingHashes.insert(pair.first);
+            } else {
+                validReferences++;
             }
         }
         
         if (missingHashes.empty()) {
-            std::cout << "  ✓ All " << totalReferences << " rule references are valid" << std::endl;
+            std::cout << "  ✓ All " << ruleHashToCombos.size() << " rule references are valid" << std::endl;
         } else {
-            std::cout << "  ⚠ WARNING: Found " << missingHashes.size() << " missing rule references!" << std::endl;
+            std::cout << "  ✗ WARNING: Found " << missingHashes.size() << " missing rule references!" << std::endl;
+            std::cout << "  ✓ Valid references: " << validReferences << std::endl;
             std::cout << "\n  Sample of missing rules (first 5):" << std::endl;
             int count = 0;
             for (size_t hash : missingHashes) {
@@ -267,16 +288,85 @@ void RuleStorage::printStatistics() {
                     std::cout << "    Hash " << hash << ":" << std::endl;
                     auto rule = hashToRule.find(hash);
                     if (rule != hashToRule.end()) {
+                        std::cout << "      Found in hashToRule!" << std::endl;
                         std::cout << "      computeRuleString: " << rule->second->computeRuleString(index.get()) << std::endl;
-                        std::cout << "      haser(computeRuleString): " << std::hash<std::string>{}(rule->second->computeRuleString(index.get())) << std::endl;
-                        std::cout << "      ruleString: " << rule->second->rulestring << std::endl;
-                        std::cout << "      haser(ruleString): " << std::hash<std::string>{}(rule->second->rulestring) << std::endl;
-
+                        std::cout << "      getRuleHash(): " << rule->second->getRuleHash() << std::endl;
+                        std::cout << "      hash(computeRuleString): " << std::hash<std::string>{}(rule->second->computeRuleString(index.get())) << std::endl;
+                        std::cout << "      rulestring: " << rule->second->rulestring << std::endl;
+                        std::cout << "      hash(rulestring): " << std::hash<std::string>{}(rule->second->rulestring) << std::endl;
+                    } else {
+                        std::cout << "      Not found in hashToRule either!" << std::endl;
                     }
                 } else {
                     std::cout << "    ... (and " << (missingHashes.size() - 5) << " more)" << std::endl;
                     break;
                 }
+            }
+        }
+        
+        // ========== Validate Combo Completeness ==========
+        std::cout << "\n  Validating combo completeness..." << std::endl;
+        
+        // Step 1: Build combo2count by traversing all rules
+        std::unordered_map<Combo*, int> combo2count;
+        
+        for (const auto& rule : rules) {
+            size_t ruleHash = rule->getRuleHash();
+            
+            // Check if this rule is referenced by any combos
+            auto it = ruleHashToCombos.find(ruleHash);
+            if (it != ruleHashToCombos.end()) {
+                // Increment count for each combo that references this rule
+                for (Combo* combo : it->second) {
+                    combo2count[combo]++;
+                }
+            }
+        }
+        
+        // Step 2: Verify that all combos have complete rule sets
+        int validCombos = 0;
+        int incompleteCombos = 0;
+        std::vector<Combo*> firstIncomplete;
+        
+        for (const auto& combo : combos) {
+            auto countIt = combo2count.find(combo.get());
+            
+            if (countIt == combo2count.end()) {
+                // Combo has zero matching rules
+                incompleteCombos++;
+                if (firstIncomplete.size() < 5) {
+                    firstIncomplete.push_back(combo.get());
+                }
+            } else if (countIt->second != combo->length) {
+                // Combo has partial matches (not all rules found)
+                incompleteCombos++;
+                if (firstIncomplete.size() < 5) {
+                    firstIncomplete.push_back(combo.get());
+                }
+            } else {
+                // Combo is complete
+                validCombos++;
+            }
+        }
+        
+        std::cout << "  Total combos: " << combos.size() << std::endl;
+        std::cout << "  ✓ Complete combos: " << validCombos << std::endl;
+        
+        if (incompleteCombos > 0) {
+            std::cout << "  ✗ Incomplete combos: " << incompleteCombos << std::endl;
+            std::cout << "\n  Sample of incomplete combos (first " << firstIncomplete.size() << "):" << std::endl;
+            
+            for (Combo* combo : firstIncomplete) {
+                int foundCount = 0;
+                auto countIt = combo2count.find(combo);
+                if (countIt != combo2count.end()) {
+                    foundCount = countIt->second;
+                }
+                
+                std::cout << "    Combo (expected=" << combo->length 
+                          << ", found=" << foundCount 
+                          << ", conf=" << combo->confidence << "):" << std::endl;
+                
             }
         }
     }

@@ -28,7 +28,7 @@ public:
     // writes to, e.g., this->headQueryResults[rel][source_entitiy].aggrCand
     void aggregateQueryResults(std::string direction, TripleStorage& train, RuleStorage& rules);
     //aggregation functions
-    void scoreMaxPlus(const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggregatedCand, TripleStorage& train, RuleStorage& rules);
+    void scoreMaxPlus(const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggregatedCand, TripleStorage& train, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
     // writes to e.g. this->headQueryResults[rel][head].aggrCand
     void makeRanking(TripleStorage& target, TripleStorage& train, RuleStorage& rules, TripleStorage& addFilter);
     void writeRanking(TripleStorage& target, std::string path);
@@ -57,6 +57,9 @@ public:
     void setScoreCollectGroundings(bool ind);
     bool getScoreCollectGroundings();
     void setAdaptTopK(bool ind);
+    void setQueryTopK(int num) {
+        queryTopK = num;
+    }
 
 
     //triple scoring
@@ -71,6 +74,7 @@ public:
 private:
     // tail candidates for head queries and all the respective rules that predicted them
     // [relation][tail] --> cands
+    int queryTopK = 10;
     std::unordered_map<int,std::unordered_map<int, NodeToPredRules>> headQcandsRules;
     // tail candidates and the aggregated confidences
     std::unordered_map<int,std::unordered_map<int, CandidateConfs>> headQcandsConfs;
@@ -88,8 +92,8 @@ private:
     //std::unordered_map<int,std::unordered_map<int, QueryResults>> headQueryResults;
     //std::unordered_map<int,std::unordered_map<int, QueryResults>> tailQueryResults;
 
-    void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules);
-    void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules);
+    void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
+    void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
 
 
 

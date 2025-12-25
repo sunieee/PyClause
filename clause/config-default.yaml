@@ -137,6 +137,7 @@ ranking_handler:
   # e.g., when there are 90 candidates already calculated and the next
   # rule predicts 30 new candidates, we allow a maximum of 120 candidates
   topk: 100
+  queryTopK: 50
   # select from "maxplus" / "noisyor"
   # maxplus scores of a ranking will be of the highest predicting rule
   # candidate discrimination is based on comparing the sequences of predicting

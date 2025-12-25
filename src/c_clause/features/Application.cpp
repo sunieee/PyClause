@@ -6,6 +6,7 @@
 #include <iostream>
 #include <functional>
 #include <chrono>
+#include <mutex>
 
 
 #include "Application.h"
@@ -28,7 +29,7 @@ void ApplicationHandler::calculateTripleScores(std::vector<Triple> triples, Trip
     }
 
 
-    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&);
+    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&, int, int, bool, const int*, int);
     SortAndProcessPtr sortAndProcess = nullptr;
 
     if(rank_aggrFunc=="noisyor") {
@@ -85,8 +86,8 @@ void ApplicationHandler::calculateTripleScores(std::vector<Triple> triples, Trip
             // we actually only have on candidate but we still need to process
             std::unordered_map<int, double>& candScores = tripleResults.getCandScores();
             std::vector<std::pair<int, double>> sortedCandScores(candScores.begin(), candScores.end());
-            // tie handling, final processing, sorting
-            (this->*sortAndProcess)(sortedCandScores, tripleResults, train, rules);
+            // tie handling, final processing, sorting (no query context for triple scoring)
+            (this->*sortAndProcess)(sortedCandScores, tripleResults, train, rules, -1, -1, true, nullptr, 0);
 
             #pragma omp critical
             {  
@@ -117,7 +118,7 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
         predictHeadOrTail = &Rule::predictHeadQuery;
     }
 
-    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&);
+    typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&, int, int, bool, const int*, int);
     SortAndProcessPtr sortAndProcess = nullptr;
 
     if(rank_aggrFunc=="noisyor") {
@@ -226,7 +227,11 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
             std::vector<std::pair<int, double>> sortedCandScores;
             // tie handling, final processing, sorting
             if (performAggregation){
-                (this->*sortAndProcess)(sortedCandScores, qResults, train, rules);
+                // Get ground truth targets for this query
+                int* gtBegin;
+                int gtLength;
+                dirIsTail ? target.getTforHR(source, rel, gtBegin, gtLength) : target.getHforTR(source, rel, gtBegin, gtLength);
+                (this->*sortAndProcess)(sortedCandScores, qResults, train, rules, rel, source, dirIsTail, gtBegin, gtLength);
             }
                     
 
@@ -251,7 +256,7 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
     } //pragma
 }
 
-void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules){
+void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel, int querySource, bool queryDirIsTail, const int* groundTruthTargets, int numGroundTruth){
     // noisyor scoring is already performed in QueryResults
 
    std::unordered_map<int, double>& candScores = qResults.getCandScores();
@@ -289,8 +294,8 @@ for (auto& pair: candScoresToSort){
 
 }
 
-void ApplicationHandler::sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules){
-    scoreMaxPlus(qResults.getCandRules(), candScoresToSort, data, rules);
+void ApplicationHandler::sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel, int querySource, bool queryDirIsTail, const int* groundTruthTargets, int numGroundTruth){
+    scoreMaxPlus(qResults.getCandRules(), candScoresToSort, data, rules, queryRel, querySource, queryDirIsTail, groundTruthTargets, numGroundTruth);
 }
 
 // currently not used in the ranking process
@@ -453,30 +458,179 @@ void ApplicationHandler::writeRules(TripleStorage& target, std::string filepath,
 }
 
 void ApplicationHandler::scoreMaxPlus(
-    const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train, RuleStorage& rules
+    const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train, RuleStorage& rules,
+    int queryRel, int querySource, bool queryDirIsTail, const int* groundTruthTargets, int numGroundTruth
      ){
     
     // Pre-compute score lists for all candidates
     std::unordered_map<int, std::vector<double>> candToScoreList;
+    std::unordered_map<int, std::vector<double>> candToScoreListBeforeCombo; // For comparison
+    
+    // Debug: Track first few queries for detailed analysis - ONLY thread 0
+    static int queryCount = 0;
+    static std::mutex debugMutex;
+    bool shouldDebug = false;
+    int threadNum = omp_get_thread_num();
+    Rule * bestRule = nullptr;
+    
+    if (threadNum == 0 && queryRel >= 0) {
+        std::lock_guard<std::mutex> lock(debugMutex);
+        if (queryCount < queryTopK) {
+            shouldDebug = true;
+            queryCount++;
+            std::cout << "\n========== Query #" << queryCount << " Debug Info (Thread 0) ==========" << std::endl;
+            std::cout << "  Query: " << querySource << " " << queryRel << " ?" << std::endl;
+            std::cout << "  Direction: Predicting " << (queryDirIsTail ? "TAIL" : "HEAD") << std::endl;
+            if (numGroundTruth > 0 && groundTruthTargets != nullptr) {
+                std::cout << "  Ground Truth (" << numGroundTruth << " targets): ";
+                for (int i = 0; i < numGroundTruth; i++) {
+                    std::cout << groundTruthTargets[i];
+                    if (i < numGroundTruth - 1) std::cout << ", ";
+                }
+                std::cout << std::endl;
+            }
+        }
+    }
 
     for (const auto& pair : candToRules) {
         int candidate = pair.first;
-        const std::vector<Rule*>& appliedRules = pair.second;
+        std::vector<Rule*> appliedRules = pair.second;
         
         std::vector<double> scoreList;
+        std::vector<double> scoreListBeforeCombo; // For comparison
 
-        // Step 1: Add all single rule confidences
+        // Step 1: Sort applied rules by confidence (descending)
+        std::sort(appliedRules.begin(), appliedRules.end(), 
+            [](Rule* a, Rule* b) { return a->getConfidence() > b->getConfidence(); });
+        bestRule = appliedRules.empty() ? nullptr : appliedRules[0];
+        
+        // Step 2: Build scoreList with single rule confidences (already sorted)
         for (Rule* rule : appliedRules) {
             scoreList.push_back(rule->getConfidence());
+            scoreListBeforeCombo.push_back(rule->getConfidence());
         }
+        
+        double maxConfBefore = scoreList.empty() ? 0.0 : scoreList[0];
+        
+        if (shouldDebug) {
+            std::cout << "\nCandidate " << candidate << " has " << appliedRules.size() << " applied rules" << std::endl;
+            std::cout << "  Top 5 rule confidences: ";
+            for (int i = 0; i < std::min(5, (int)scoreList.size()); i++) {
+                std::cout << scoreList[i] << " ";
+            }
+            std::cout << std::endl;
+            std::cout << "  Max confidence before combo: " << maxConfBefore << std::endl;
+        }
+        
+        // Step 3: Find and add combo confidences if applicable
+        bool foundCombo = false;
+        Combo* bestCombo = nullptr;
+        std::vector<Rule*> comboMemberRules;
+        
+        auto findCombo = [&](int topK = 1) {
+            auto& ruleHashToCombos = rules.getRuleHashToCombos();
+            int addedCombos = 0;
+            
+            // Build combo2count
+            std::unordered_map<Combo*, int> combo2count;
+            std::unordered_map<Combo*, std::vector<Rule*>> comboToRules; // Track which rules form the combo
+            
+            for (Rule* rule : appliedRules) {
+                size_t ruleHash = rule->getRuleHash();
+                if (ruleHashToCombos.count(ruleHash)) {
+                    for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
+                        combo2count[combo]++;
+                        comboToRules[combo].push_back(rule);
+                        
+                        if (combo2count[combo] == combo->length) {
+                            // All rules in combo have been applied; add combo confidence
+                            scoreList.push_back(combo->confidence);
+                            addedCombos++;
+                            
+                            if (!foundCombo) {
+                                foundCombo = true;
+                                bestCombo = combo;
+                                comboMemberRules = comboToRules[combo];
+                            }
+                            
+                            if (addedCombos >= topK) return; 
+                        }
+                    }
+                }
+            }
+        };
+        
+        if (rules.hasCombos() && !appliedRules.empty()) {
+            findCombo(1);
+        }
+        
         // Sort scoreList in descending order for comparison
         std::sort(scoreList.begin(), scoreList.end(), std::greater<double>());
         
+        double maxConfAfter = scoreList.empty() ? 0.0 : scoreList[0];
+        bool maxConfChanged = (maxConfAfter != maxConfBefore);
+        
+        if (shouldDebug && foundCombo) {
+            std::cout << "\n  [COMBO FOUND]" << ", length: " << bestCombo->length << ", confidence: " << bestCombo->confidence << ", numTrue: " << bestCombo->numTrue << ", numPreds: " << bestCombo->numPreds << std::endl;
+            for (int i = 0; i < comboMemberRules.size(); i++) {
+                Rule* memberRule = comboMemberRules[i];
+                
+                // Find position in scoreListBeforeCombo
+                int position = -1;
+                for (int j = 0; j < scoreListBeforeCombo.size(); j++) {
+                    if (std::abs(scoreListBeforeCombo[j] - memberRule->getConfidence()) < 1e-9) {
+                        position = j;
+                        break;
+                    }
+                }
+                
+                std::cout << "      Rule #" << (i+1) << ":" << memberRule->computeRuleString(train.getIndex()) << std::endl;
+                std::cout << "        Confidence: " << memberRule->getConfidence() << ", Position in scoreList: " << position << " (0-indexed)" << ", ID: " << memberRule->getID() << std::endl;
+            }
+            
+            std::cout << "\n    Max confidence changed: " << (maxConfChanged ? "YES" : "NO") << std::endl;
+            if (maxConfChanged) {
+                std::cout << "      Before: " << maxConfBefore << " -> After: " << maxConfAfter << std::endl;
+                std::cout << "      Improvement: " << (maxConfAfter - maxConfBefore) << std::endl;
+            }
+
+            double bestRuleConf = (bestRule != nullptr) ? bestRule->getConfidence() : 0.0;
+            double bestComboConf = (bestCombo != nullptr) ? bestCombo->confidence : 0.0;
+            if (bestCombo != nullptr && bestComboConf >= bestRuleConf) {
+                std::cout << "      Max confidence source: COMBO (length=" << bestCombo->length 
+                          << ", conf=" << bestCombo->confidence << ")" << std::endl;
+            } else if (bestRule != nullptr) {
+                std::cout << "      Max confidence source: RULE (ID=" << bestRule->getID() 
+                          << ", conf=" << bestRule->getConfidence() 
+                          << ", rule=" << bestRule->computeRuleString(train.getIndex()) << ")" << std::endl;
+            }
+            
+            std::cout << "    Top 5 confidences after adding combo: ";
+            for (int i = 0; i < std::min(5, (int)scoreList.size()); i++) {
+                std::cout << scoreList[i] << " ";
+            }
+            std::cout << std::endl;
+        } else if (shouldDebug && !foundCombo) {
+            std::cout << "  [NO COMBO FOUND]" << std::endl;
+        }
+        
         candToScoreList[candidate] = std::move(scoreList);
+        candToScoreListBeforeCombo[candidate] = std::move(scoreListBeforeCombo);
+    }
+    
+    if (shouldDebug) {
+        std::cout << "\n[RANKING PHASE]" << std::endl;
+        std::cout << "  Sorting " << candToRules.size() << " candidates by lexicographic order..." << std::endl;
     }
 
     // Now sort candidates using pre-computed score lists
     std::vector<std::pair<int, std::vector<Rule*>>> candsToSort(candToRules.begin(), candToRules.end());
+    
+    // Store original order for comparison and find ground truth positions
+    std::vector<int> originalOrder;
+    std::unordered_map<int, int> candToorigRank;
+    std::unordered_map<int, int> gtPositionsBefore;
+    std::unordered_map<int, int> gtPositionsAfter;
 
     auto sortLexicographic = [&train, &candToScoreList, this](
         const std::pair<int, std::vector<Rule*>>& candA, 
@@ -509,8 +663,119 @@ void ApplicationHandler::scoreMaxPlus(
             throw std::runtime_error("Could not understand tie_handling_parameter in scoreMaxPlus.");
         }
     };
+
+
+    auto sortLexicographicBeforeCombo = [&train, &candToScoreListBeforeCombo, this](
+        const std::pair<int, std::vector<Rule*>>& candA, 
+        const std::pair<int, std::vector<Rule*>>& candB) {
+        
+        const std::vector<double>& scoresA = candToScoreListBeforeCombo.at(candA.first);
+        const std::vector<double>& scoresB = candToScoreListBeforeCombo.at(candB.first);
+        
+        // Compare score lists lexicographically
+        size_t minSize = std::min(scoresA.size(), scoresB.size());
+        for (size_t i = 0; i < minSize; i++) {
+            if (scoresA[i] > scoresB[i]) return true;
+            if (scoresB[i] > scoresA[i]) return false;
+        }
+        
+        // If all compared scores are equal, rank by number of scores
+        if (scoresA.size() > scoresB.size()) return true;
+        if (scoresB.size() > scoresA.size()) return false;
+        
+        // Tie handling for exactly same scores
+        if (this->rank_tie_handling == "random") {
+            return false;
+        } else if (this->rank_tie_handling == "frequency") {
+            if (train.getFreq(candA.first) != train.getFreq(candB.first)) {
+                return train.getFreq(candA.first) > train.getFreq(candB.first);
+            } else {
+                return candA.first < candB.first;
+            }
+        } else {
+            throw std::runtime_error("Could not understand tie_handling_parameter in scoreMaxPlus.");
+        }
+    };
     
+    // 根据 candToScoreListBeforeCombo 排序 candsToSort，并填充 originalOrder 和 gtPositionsBefore
+    if (shouldDebug) {
+        std::sort(candsToSort.begin(), candsToSort.end(), sortLexicographicBeforeCombo);
+        for (int i = 0; i < candsToSort.size(); i++) {
+            int candId = candsToSort[i].first;
+            originalOrder.push_back(candId);
+            candToorigRank[candId] = i; 
+            // Check if this candidate is in ground truth
+            if (groundTruthTargets != nullptr) {
+                for (int j = 0; j < numGroundTruth; j++) {
+                    if (candId == groundTruthTargets[j]) {
+                        gtPositionsBefore[candId] = i + 1; // 1-indexed rank
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+
     std::sort(candsToSort.begin(), candsToSort.end(), sortLexicographic);
+    
+    if (shouldDebug) {
+        // Find ground truth positions after sorting
+        for (int i = 0; i < candsToSort.size(); i++) {
+            int candId = candsToSort[i].first;
+            if (gtPositionsBefore.count(candId) > 0) {
+                gtPositionsAfter[candId] = i + 1; // 1-indexed rank
+            }
+        }
+        
+        std::cout << "  Top 10 candidates after sorting:" << std::endl;
+        for (int i = 0; i < std::min(10, (int)candsToSort.size()); i++) {
+            int candId = candsToSort[i].first;
+            const std::vector<double>& scores = candToScoreList.at(candId);
+            double maxConf = scores.empty() ? 0.0 : scores[0];
+            
+            // Check if order changed
+            bool orderChanged = (i < originalOrder.size() && originalOrder[i] != candId);
+            
+            // Check if this is a ground truth
+            bool isGroundTruth = (gtPositionsBefore.count(candId) > 0);
+            int origRank = candToorigRank.at(candId) + 1;
+            std::cout << "    Rank " << (i+1) << ": Candidate " << candId 
+                      << ", MaxConf=" << maxConf << ", MaxConfBefore=" << candToScoreListBeforeCombo.at(candId).front() << ", origRank=" << origRank
+                      << ", NumScores=" << scores.size();
+            if (orderChanged) {
+                std::cout << " [ORDER CHANGED]";
+            }
+            if (isGroundTruth) {
+                std::cout << " [GROUND TRUTH]";
+            }
+            std::cout << std::endl;
+        }
+        
+        // Analyze ground truth ranking changes
+        if (!gtPositionsBefore.empty()) {
+            std::cout << "\n  [GROUND TRUTH RANKING ANALYSIS]" << std::endl;
+            for (const auto& pair : gtPositionsBefore) {
+                int gtId = pair.first;
+                int rankBefore = pair.second;
+                int rankAfter = gtPositionsAfter[gtId];
+                int rankChange = rankBefore - rankAfter; // positive = improved (moved up)
+                
+                std::cout << "    Ground Truth " << gtId << ":" << std::endl;
+                std::cout << "      Rank before combo: " << rankBefore << std::endl;
+                std::cout << "      Rank after combo: " << rankAfter << std::endl;
+                if (rankChange > 0) {
+                    std::cout << "      Result: IMPROVED (moved up by " << rankChange << " positions)" << std::endl;
+                } else if (rankChange < 0) {
+                    std::cout << "      Result: DEGRADED (moved down by " << (-rankChange) << " positions)" << std::endl;
+                } else {
+                    std::cout << "      Result: NO CHANGE" << std::endl;
+                }
+            }
+        }
+        
+        std::cout << "==========================================\n" << std::endl;
+    }
     
     // Take sorted candidates and use their highest score
     for (const auto& pair : candsToSort) {

@@ -32,6 +32,7 @@ void BackendHandler::setRankingOptions(std::map<std::string, std::string> option
         {"tie_handling", [&ranker](std::string val) { ranker.setTieHandling(val); }},
         {"num_threads", [&ranker](std::string val) { ranker.setNumThr(std::stoi(val)); }},
         {"adapt_topk", [&ranker](std::string val) { ranker.setAdaptTopK(util::stringToBool(val)); }},
+        {"queryTopK", [&ranker](std::string val) { ranker.setQueryTopK(std::stoi(val)); }},
 
     };
 
