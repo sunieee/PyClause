@@ -187,6 +187,7 @@ void Loader::setRuleOptions(std::map<std::string, std::string> options, RuleFact
         {"combo_min_support", [&ruleFactory](std::string val) {ruleFactory.setMinCorrect(std::stoi(val), "m");}},
         {"combo_min_pred", [&ruleFactory](std::string val) {ruleFactory.setMinPred(std::stoi(val), "m");}},
         {"combo_min_conf", [&ruleFactory](std::string val) {ruleFactory.setMinConf(std::stod(val), "m");}},
+        {"combo_num_unseen", [&ruleFactory](std::string val) {ruleFactory.setNumUnseen(std::stoi(val), "combo");}},
         // other
         {"num_threads", [this](std::string val) {this->setNumThreads(std::stoi(val));}},
         

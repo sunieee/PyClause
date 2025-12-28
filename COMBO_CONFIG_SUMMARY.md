@@ -3,16 +3,21 @@
 ## 修改文件清单
 
 ### 1. 配置文件
-- `clause/config-default.yaml`: 添加了5个combo配置项
+- `clause/config-default.yaml`: 添加了6个combo配置项
 
 ### 2. C++核心代码
-- `src/c_clause/core/RuleFactory.h`: 添加了`setComboDebug()`方法声明
+- `src/c_clause/core/Combo.h`: 添加了`numUnseen`成员变量和`getConfidence()`、`setNumUnseen()`方法
+- `src/c_clause/core/Combo.cpp`: 实现了`getConfidence()`和`setNumUnseen()`方法
+- `src/c_clause/core/RuleFactory.h`: 添加了`CombonumUnseen`变量和`getCombonumUnseen()`方法
 - `src/c_clause/core/RuleFactory.cpp`: 
   - 实现`setComboDebug()`方法
   - 在`setMinCorrect()`, `setMinPred()`, `setMinConf()`中添加对"m"类型的支持
+  - 在`setNumUnseen()`中添加对"combo"类型的支持
+- `src/c_clause/core/RuleStorage.cpp`: 在`addCombo()`中设置combo的numUnseen
+- `src/c_clause/features/Application.cpp`: 使用`combo->getConfidence()`代替直接访问`combo->confidence`
 
 ### 3. C++接口代码
-- `src/c_clause/api/Loader.cpp`: 添加5个combo配置项的处理器
+- `src/c_clause/api/Loader.cpp`: 添加6个combo配置项的处理器（包括combo_num_unseen）
 
 ### 4. 示例和文档
 - `examples/demo-combo-config.py`: 演示如何配置combo规则
@@ -27,6 +32,24 @@
 | `combo_min_pred` | int | -1 | 最小预测数（-1表示不过滤） |
 | `combo_min_support` | int | -1 | 最小支持度/正确数（-1表示不过滤） |
 | `combo_min_conf` | float | 0.0001 | 最小置信度阈值 |
+| `combo_num_unseen` | int | 5 | Laplace平滑参数（用于计算置信度） |
+
+### Laplace平滑说明
+
+`combo_num_unseen` 用于对combo规则应用Laplace平滑。实际应用时的置信度计算公式为：
+
+```
+applied_confidence = numTrue / (numPreds + combo_num_unseen)
+```
+
+- **原始confidence**: `numTrue / numPreds` (存储在文件中)
+- **应用时confidence**: `numTrue / (numPreds + combo_num_unseen)` (实际排序使用)
+
+例如：
+- 如果规则文件中 `numPreds=22, numTrue=16, confidence=0.727` (16/22)
+- 当 `combo_num_unseen=5` 时，实际应用的置信度 = `16/(22+5) = 0.593`
+
+设置 `combo_num_unseen=0` 可以禁用Laplace平滑，使用原始置信度。
 
 ## 配置方式
 
@@ -40,6 +63,7 @@ loader:
   combo_min_pred: 10
   combo_min_support: 5
   combo_min_conf: 0.001
+  combo_num_unseen: 5  # Laplace平滑参数，设为0可禁用平滑
 ```
 
 ```python

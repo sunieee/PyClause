@@ -57,6 +57,9 @@ public:
     void setCmaxLength(int val);
     void setDmaxLength(int val);
     
+    // Getter for combo num_unseen
+    int getCombonumUnseen() const { return CombonumUnseen; }
+    
     // Set RuleStorage for combo parsing
     void setRuleStorage(class RuleStorage* storage) { ruleStorage = storage; }
 
@@ -69,6 +72,7 @@ private:
     int MminCorrect = 1;
     int MminPreds = 1;
     double MminConf = 0.0;
+    int CombonumUnseen = 0;
 
     // ***Rule options***
     bool createRuleZ = true;

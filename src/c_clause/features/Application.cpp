@@ -478,16 +478,52 @@ void ApplicationHandler::scoreMaxPlus(
         if (queryCount < queryTopK) {
             shouldDebug = true;
             queryCount++;
+            Index* index = train.getIndex();
+            
             std::cout << "\n========== Query #" << queryCount << " Debug Info (Thread 0) ==========" << std::endl;
-            std::cout << "  Query: " << querySource << " " << queryRel << " ?" << std::endl;
+            std::cout << "  Query (IDs): " << querySource << " " << queryRel << " ?" << std::endl;
+            std::cout << "  Query (Strings): \"" << index->getStringOfNodeId(querySource) << "\" \"" 
+                      << index->getStringOfRelId(queryRel) << "\" ?" << std::endl;
             std::cout << "  Direction: Predicting " << (queryDirIsTail ? "TAIL" : "HEAD") << std::endl;
+            
+            // Total number of candidates
+            std::cout << "  Total Candidates Found: " << candToRules.size() << std::endl;
+            
             if (numGroundTruth > 0 && groundTruthTargets != nullptr) {
-                std::cout << "  Ground Truth (" << numGroundTruth << " targets): ";
+                std::cout << "  Ground Truth (" << numGroundTruth << " targets):" << std::endl;
                 for (int i = 0; i < numGroundTruth; i++) {
-                    std::cout << groundTruthTargets[i];
-                    if (i < numGroundTruth - 1) std::cout << ", ";
+                    std::cout << "    - ID: " << groundTruthTargets[i] 
+                              << ", String: \"" << index->getStringOfNodeId(groundTruthTargets[i]) << "\"" << std::endl;
                 }
-                std::cout << std::endl;
+            }
+            
+            // Collect all rules that were actually applied in this query
+            std::unordered_set<Rule*> appliedRulesSet;
+            for (const auto& pair : candToRules) {
+                for (Rule* rule : pair.second) {
+                    appliedRulesSet.insert(rule);
+                }
+            }
+            
+            auto& relRules = rules.getRelRules(queryRel);
+            std::cout << "\n  Applied Rules: " << appliedRulesSet.size() 
+                      << " out of " << relRules.size() << " total rules for relation " << queryRel << std::endl;
+            
+            // Show top applied rules by confidence
+            std::vector<Rule*> sortedAppliedRules(appliedRulesSet.begin(), appliedRulesSet.end());
+            std::sort(sortedAppliedRules.begin(), sortedAppliedRules.end(), 
+                [](Rule* a, Rule* b) { return a->getConfidence() > b->getConfidence(); });
+            
+            int numToShow = std::min(10, (int)sortedAppliedRules.size());
+            std::cout << "  Top " << numToShow << " Applied Rules by Confidence:" << std::endl;
+            for (int i = 0; i < numToShow; i++) {
+                Rule* rule = sortedAppliedRules[i];
+                auto stats = rule->getStats(false);
+                std::cout << "    #" << (i+1) << ": " << rule->computeRuleString(index) << std::endl;
+                std::cout << "        Confidence: " << rule->getConfidence() 
+                          << ", NumTrue: " << stats[0]
+                          << ", NumPred: " << stats[1]
+                          << ", ID: " << rule->getID() << std::endl;
             }
         }
     }
@@ -527,16 +563,18 @@ void ApplicationHandler::scoreMaxPlus(
         Combo* bestCombo = nullptr;
         std::vector<Rule*> comboMemberRules;
         
-        auto findCombo = [&](int topK = 1) {
+        auto findCombo = [&]() {
             auto& ruleHashToCombos = rules.getRuleHashToCombos();
             int addedCombos = 0;
             
             // Build combo2count
             std::unordered_map<Combo*, int> combo2count;
             std::unordered_map<Combo*, std::vector<Rule*>> comboToRules; // Track which rules form the combo
-            
+            int NotFoundStep = 0;
+
             for (Rule* rule : appliedRules) {
                 size_t ruleHash = rule->getRuleHash();
+                NotFoundStep ++;
                 if (ruleHashToCombos.count(ruleHash)) {
                     for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
                         combo2count[combo]++;
@@ -544,24 +582,23 @@ void ApplicationHandler::scoreMaxPlus(
                         
                         if (combo2count[combo] == combo->length) {
                             // All rules in combo have been applied; add combo confidence
-                            scoreList.push_back(combo->confidence);
-                            addedCombos++;
+                            scoreList.push_back(combo->getConfidence());
                             
-                            if (!foundCombo) {
-                                foundCombo = true;
+                            if (combo->getConfidence() > (bestCombo ? bestCombo->getConfidence() : 0.0)) {
+                                NotFoundStep = 0;
                                 bestCombo = combo;
                                 comboMemberRules = comboToRules[combo];
+                                foundCombo = true;
                             }
-                            
-                            if (addedCombos >= topK) return; 
                         }
                     }
+                    if (NotFoundStep >= 3 && bestCombo != nullptr) return; 
                 }
             }
         };
         
         if (rules.hasCombos() && !appliedRules.empty()) {
-            findCombo(1);
+            findCombo();
         }
         
         // Sort scoreList in descending order for comparison
@@ -571,7 +608,7 @@ void ApplicationHandler::scoreMaxPlus(
         bool maxConfChanged = (maxConfAfter != maxConfBefore);
         
         if (shouldDebug && foundCombo) {
-            std::cout << "\n  [COMBO FOUND]" << ", length: " << bestCombo->length << ", confidence: " << bestCombo->confidence << ", numTrue: " << bestCombo->numTrue << ", numPreds: " << bestCombo->numPreds << std::endl;
+            std::cout << "\n  [COMBO FOUND]" << " length: " << bestCombo->length << ", confidence: " << bestCombo->getConfidence() << ", numTrue: " << bestCombo->numTrue << ", numPreds: " << bestCombo->numPreds << std::endl;
             for (int i = 0; i < comboMemberRules.size(); i++) {
                 Rule* memberRule = comboMemberRules[i];
                 
@@ -595,10 +632,10 @@ void ApplicationHandler::scoreMaxPlus(
             }
 
             double bestRuleConf = (bestRule != nullptr) ? bestRule->getConfidence() : 0.0;
-            double bestComboConf = (bestCombo != nullptr) ? bestCombo->confidence : 0.0;
+            double bestComboConf = (bestCombo != nullptr) ? bestCombo->getConfidence() : 0.0;
             if (bestCombo != nullptr && bestComboConf >= bestRuleConf) {
                 std::cout << "      Max confidence source: COMBO (length=" << bestCombo->length 
-                          << ", conf=" << bestCombo->confidence << ")" << std::endl;
+                          << ", conf=" << bestCombo->getConfidence() << ")" << std::endl;
             } else if (bestRule != nullptr) {
                 std::cout << "      Max confidence source: RULE (ID=" << bestRule->getID() 
                           << ", conf=" << bestRule->getConfidence() 

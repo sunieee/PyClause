@@ -4,20 +4,28 @@
 #include <algorithm>
 
 Combo::Combo(const std::vector<size_t>& ruleHashes, int numTrue, int numPreds, bool isBinary) 
-    : numTrue(numTrue), numPreds(numPreds), isBinary(isBinary) {
+    : numTrue(numTrue), numPreds(numPreds), isBinary(isBinary), numUnseen(0) {
     
     // Create a sorted copy for hash computation
     std::vector<size_t> sortedHashes = ruleHashes;
     std::sort(sortedHashes.begin(), sortedHashes.end());
     
     length = sortedHashes.size();
-    confidence = (numPreds > 0) ? (double)numTrue / numPreds : 0.0;
     
     computeHash(sortedHashes);
     
     if (comboDebug) {
-        std::cout << "[Combo] Created with " << length << " rules, conf=" << confidence << std::endl;
+        std::cout << "[Combo] Created with " << length << " rules, conf=" << numTrue << "/" << numPreds << std::endl;
     }
+}
+
+double Combo::getConfidence() const {
+    // Apply Laplace smoothing: numTrue / (numPreds + numUnseen)
+    return (double)numTrue / ((double)numPreds + (double)numUnseen);
+}
+
+void Combo::setNumUnseen(int val) {
+    numUnseen = val;
 }
 
 void Combo::computeHash(const std::vector<size_t>& sortedHashes) {

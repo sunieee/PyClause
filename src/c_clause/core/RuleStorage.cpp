@@ -166,6 +166,9 @@ void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
         throw std::runtime_error("Null combo pointer");
     }
     
+    // Set the Laplace smoothing parameter from RuleFactory
+    combo->setNumUnseen(ruleFactory->getCombonumUnseen());
+    
     // Add to storage with mutex protection
     try {
         std::lock_guard<std::mutex> lock(comboMutex);  // Lock for vector access
@@ -365,7 +368,7 @@ void RuleStorage::printStatistics() {
                 
                 std::cout << "    Combo (expected=" << combo->length 
                           << ", found=" << foundCount 
-                          << ", conf=" << combo->confidence << "):" << std::endl;
+                          << ", conf=" << combo->getConfidence() << "):" << std::endl;
                 
             }
         }

@@ -14,9 +14,15 @@ public:
     size_t hashCode;                   // Hash computed from memberHashes
     int numTrue;                       // Number of correct predictions
     int numPreds;                      // Total number of predictions
-    double confidence;                 // Confidence = numTrue / numPreds
+    int numUnseen;                     // Laplace smoothing parameter
 
     Combo(const std::vector<size_t>& ruleHashes, int numTrue, int numPreds, bool isBinary);
+    
+    // Get confidence with Laplace smoothing: numTrue / (numPreds + numUnseen)
+    double getConfidence() const;
+    
+    // Set the Laplace smoothing parameter
+    void setNumUnseen(int val);
     
     // Compute hash from sorted rule hashes
     void computeHash(const std::vector<size_t>& sortedHashes);

@@ -773,6 +773,8 @@ void RuleFactory::setNumUnseen(int val, std::string type){
         XXCnumUnseen = val;
     }else if (type=="d"){
         DnumUnseen = val;
+    }else if (type=="m" || type=="combo"){
+        CombonumUnseen = val;
     }else{
        throw std::runtime_error("Did not recognize rule type in setting num_unseen: " + type );
     }

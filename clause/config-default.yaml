@@ -89,6 +89,11 @@ loader:
   z_min_preds: -1
   z_min_conf: 0.0001
 
+  ## Combo rules
+  # Laplace smoothing parameter for combo rules
+  # combo_confidence = numTrue / (numPreds + combo_num_unseen)
+  combo_num_unseen: 5
+
   ## U_xxc rules
   # parsable example: "h(X,X) <= b1(X,c)" (c being an entity in the graph)
   # has always length 1
@@ -137,7 +142,7 @@ ranking_handler:
   # e.g., when there are 90 candidates already calculated and the next
   # rule predicts 30 new candidates, we allow a maximum of 120 candidates
   topk: 100
-  queryTopK: 50
+  queryTopK: 100
   # select from "maxplus" / "noisyor"
   # maxplus scores of a ranking will be of the highest predicting rule
   # candidate discrimination is based on comparing the sequences of predicting
