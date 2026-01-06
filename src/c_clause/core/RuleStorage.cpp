@@ -119,6 +119,9 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
     int currID = 0;
     std::unordered_set<size_t> seenHashes;
     
+    int maxDepth = ruleFactory->getMmaxDepth();
+    int filteredComboRules = 0;
+    
     for (int i=0; i<rules_ptr.size(); i++){
         if (rules_ptr[i]){
             size_t ruleHash = ruleHashes_vec[i];
@@ -137,12 +140,23 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             // Store for debugging: hash to rule mapping
             hashToRule[ruleHash] = rules_ptr[i].get();
             
+            // Filter combo index by max_depth: remove rules with length > maxDepth
+            if (maxDepth > 0 && rules_ptr[i]->getLength() > maxDepth) {
+                ruleHashToCombos.erase(ruleHash);
+                filteredComboRules++;
+            }
+            
             // must be done after id is set
             relToRules[rules_ptr[i]->getTargetRel()].insert(rules_ptr[i].get());
             currID += 1;
             rules.push_back(std::move(rules_ptr[i]));
         }
     }
+    
+    if (filteredComboRules > 0) {
+        std::cout << "Filtered " << filteredComboRules << " rules from combo index (length > " << maxDepth << ")" << std::endl;
+    }
+    
     std::cout<<"Loaded and indexed "<<currID<<" rules."<<std::endl;
     printStatistics();
 }

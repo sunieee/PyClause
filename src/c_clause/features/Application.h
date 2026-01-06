@@ -60,6 +60,9 @@ public:
     void setQueryTopK(int num) {
         queryTopK = num;
     }
+    void setComboNoisyorMethod(std::string method) {
+        combo_noisyor_method = method;
+    }
 
 
     //triple scoring
@@ -151,6 +154,12 @@ private:
     // it also ensures that the number of candidates is correct
     // when filtering with target, what we always do for KBC
     bool adapt_topk = false;
+
+    // Method for applying combos in noisyor aggregation
+    // "none": no combo support
+    // "max": add only the combo with maximum surprisal lift
+    // "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
+    std::string combo_noisyor_method = "none";
 
 
     //***triple scoring options***

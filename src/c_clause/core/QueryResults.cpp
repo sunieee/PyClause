@@ -48,9 +48,9 @@ void QueryResults::insertRule(int cand, Rule* rule){
     // new cand: -> only add and update when explicitly asked by !onlyUpdate
     if (!onlyUpdate || !newCand){
         candRules[cand].push_back(rule);
-        // we added a new rule, update aggregation score
+        // we added a new rule, update aggregation score (aggregate surprisal)
         if (performAggregation && aggregationFunction=="noisyor" ){
-                candScores[cand] += -std::log(1-rule->getConfidence());
+                candScores[cand] += rule->getSurprisal();
         }
     }
 }

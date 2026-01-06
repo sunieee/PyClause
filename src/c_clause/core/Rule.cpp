@@ -41,6 +41,16 @@ double Rule::getConfidence(bool exact){
     
 }
 
+double Rule::getSurprisal(int nUnseen, bool exact){
+    double confidence = getConfidence(nUnseen, exact);
+    return -std::log(1.0 - confidence);
+}
+
+double Rule::getSurprisal(bool exact){
+    double confidence = getConfidence(exact);
+    return -std::log(1.0 - confidence);
+}
+
 int Rule::getBranchingFactor(){
     return branchingFactor;
 }
@@ -224,7 +234,8 @@ RuleB::RuleB(std::vector<int>& relations, std::vector<bool>& directions) {
     }		
 	this->relations = relations;
     this->directions = directions;	
-    this->targetRel = relations.front();   
+    this->targetRel = relations.front();
+    this->length = directions.size();  // number of body atoms
 
      // used for predicting heads
     this->_relations = relations;
@@ -389,6 +400,7 @@ RuleC::RuleC(std::vector<int>& relations, std::vector<bool>& directions, bool& l
     this->leftC = leftC;	
     this->constants = constants;
     this->targetRel = relations.front();
+    this->length = directions.size();  // number of body atoms
 
     // used for rules where leftC=false and predicting heads
     this->_relations = relations;
@@ -753,6 +765,7 @@ RuleZ::RuleZ(int& relation, bool& leftC, int& constant) {
     this->targetRel=relation;
     this->leftC = leftC;
     this->constant = constant;
+    this->length = 0;  // Z rules have no body
     type = "z";
 }
 
@@ -861,6 +874,7 @@ RuleD::RuleD(std::vector<int>& relations, std::vector<bool>& directions, bool& l
     this->targetRel=relations[0];
     this->leftC = leftC;
     this->constant = constant;
+    this->length = directions.size();  // number of body atoms
 
     // used for rules where leftC=false
     this->_relations = relations;
@@ -1297,6 +1311,7 @@ RuleXXd::RuleXXd(std::vector<int>& relations, std::vector<bool>& directions) {
     this->relations=relations; 
     this->directions=directions;
     this->targetRel=relations[0];
+    this->length = 1;  // XXd rules have 1 body atom
 
     // only used and set after a rule is contructed and parsed from AnyBURL rule files
     this->predictHead = true;
@@ -1427,6 +1442,7 @@ RuleXXc::RuleXXc(std::vector<int>& relations, std::vector<bool>& directions, int
     this->directions=directions;
     this->targetRel=relations[0];
     this->constant = constant;
+    this->length = 1;  // XXc rules have 1 body atom
 
     // only used and set after a rule is contructed and parsed from AnyBURL rule files
     this->predictHead = true;

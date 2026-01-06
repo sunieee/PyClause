@@ -849,6 +849,14 @@ void RuleFactory::setComboDebug(bool ind){
     comboDebug = ind;
 }
 
+void RuleFactory::setComboMaxDepth(int val){
+    MmaxDepth = val;
+}
+
+void RuleFactory::setComboMaxBranch(int val){
+    MmaxBranch = val;
+}
+
 void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue) {
     int threadNum = omp_get_thread_num();
     
@@ -873,6 +881,15 @@ void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue) {
         }
         
         if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Processing rule: " << rule << std::endl;
+        
+        // Branch filtering: count semicolons to determine branch number
+        if (MmaxBranch > 0) {
+            size_t semicolonCount = std::count(rule.begin(), rule.end(), ';');
+            if (semicolonCount > static_cast<size_t>(MmaxBranch - 1)) {
+                if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Filtered by MmaxBranch (semicolons: " << semicolonCount << " > " << (MmaxBranch - 1) << ")" << std::endl;
+                return;
+            }
+        }
         
         // Split by rule separator "<=", should get head and composite body
         std::vector<std::string> headBody = util::splitString(rule, _cfg_prs_ruleSeparator);

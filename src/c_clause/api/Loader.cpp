@@ -188,6 +188,8 @@ void Loader::setRuleOptions(std::map<std::string, std::string> options, RuleFact
         {"combo_min_pred", [&ruleFactory](std::string val) {ruleFactory.setMinPred(std::stoi(val), "m");}},
         {"combo_min_conf", [&ruleFactory](std::string val) {ruleFactory.setMinConf(std::stod(val), "m");}},
         {"combo_num_unseen", [&ruleFactory](std::string val) {ruleFactory.setNumUnseen(std::stoi(val), "combo");}},
+        {"combo_max_depth", [&ruleFactory](std::string val) {ruleFactory.setComboMaxDepth(std::stoi(val));}},
+        {"combo_max_branch", [&ruleFactory](std::string val) {ruleFactory.setComboMaxBranch(std::stoi(val));}},
         // other
         {"num_threads", [this](std::string val) {this->setNumThreads(std::stoi(val));}},
         

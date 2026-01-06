@@ -124,6 +124,18 @@ loader:
   combo_min_support: -1
   # minimum confidence for combo rule
   combo_min_conf: 0.0001
+  # maximum branch (number of member rules in combo, e.g., 2 or 3) (-1 for no filter)
+  combo_max_branch: -1
+  # maximum depth (max body atoms across member rules) (-1 for no filter)
+  combo_max_depth: 2
+  
+  # DEPRECATED: Use ranking_handler.combo_noisyor_method instead
+  # Method for applying combo rules in noisyor aggregation (kept for backward compatibility)
+  # "none": no combo support in noisyor
+  # "max": add only the combo with maximum surprisal lift
+  # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
+  # "all": add all combo lifts aggressively (most aggressive method)
+  combo_noisyor_method: "none"
 
 
 # calculates rankings based on the "target" KG loaded into DataLoader
@@ -152,6 +164,13 @@ ranking_handler:
   # the noisy-or sorting is based on -\sum_i(log(1-conf_i)) and transformed
   # before outputted; this mitigates floating point considerations 
   aggregation_function: "maxplus"
+  
+  # Method for applying combo rules in noisyor aggregation
+  # "none": no combo support in noisyor
+  # "max": add only the combo with maximum surprisal lift
+  # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
+  # "all": add all combo lifts aggressively (most aggressive method)
+  combo_noisyor_method: "none"
 
   # dont add candidate proposals c for queries (h, r, ?) or (?, r, t) if
   # (h, r, c) or (c, r, t) exists in the KG given by the "data" argument of the loader

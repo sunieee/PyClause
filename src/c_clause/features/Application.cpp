@@ -258,10 +258,293 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
 
 void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel, int querySource, bool queryDirIsTail, const int* groundTruthTargets, int numGroundTruth){
     // noisyor scoring is already performed in QueryResults
+    // candScores contains aggregated surprisal values
+    // Under independent rule assumption, higher aggregated surprisal means lower failure probability
 
-   std::unordered_map<int, double>& candScores = qResults.getCandScores();
-   candScoresToSort.assign(candScores.begin(), candScores.end()); 
+    // Debug tracking - only for first few queries on thread 0
+    static int queryCount = 0;
+    static std::mutex debugMutex;
+    static bool firstCall = true;
+    bool shouldDebug = false;
+    int threadNum = omp_get_thread_num();
+    
+    // Print debug info for first call to diagnose why shouldDebug is not set
+    if (firstCall) {
+        std::lock_guard<std::mutex> lock(debugMutex);
+        if (firstCall) {
+            firstCall = false;
+            std::cout << "\n[DEBUG] sortAndProcessNoisy first call diagnostics:" << std::endl;
+            std::cout << "  threadNum: " << threadNum << std::endl;
+            std::cout << "  queryRel: " << queryRel << std::endl;
+            std::cout << "  combo_noisyor_method: '" << combo_noisyor_method << "'" << std::endl;
+            std::cout << "  combo_noisyor_method != \"none\": " << (combo_noisyor_method != "none") << std::endl;
+            std::cout << "  rules.hasCombos(): " << rules.hasCombos() << std::endl;
+            std::cout << "  queryCount: " << queryCount << std::endl;
+            std::cout << "  queryTopK: " << queryTopK << std::endl;
+            std::cout << "  All conditions for debug: " 
+                      << "thread0=" << (threadNum == 0)
+                      << ", queryRel>=0=" << (queryRel >= 0)
+                      << ", method!=none=" << (combo_noisyor_method != "none")
+                      << ", hasCombos=" << rules.hasCombos()
+                      << ", count<topK=" << (queryCount < queryTopK) << std::endl;
+        }
+    }
+    
+    if (threadNum == 0 && queryRel >= 0 && combo_noisyor_method != "none" && rules.hasCombos()) {
+        std::lock_guard<std::mutex> lock(debugMutex);
+        if (queryCount < queryTopK) {
+            shouldDebug = true;
+            queryCount++;
+            Index* index = data.getIndex();
+            
+            std::cout << "\n========== Noisy-OR Query #" << queryCount << " Debug Info (Thread 0) ==========" << std::endl;
+            std::cout << "  Query (IDs): " << querySource << " " << queryRel << " ?" << std::endl;
+            std::cout << "  Query (Strings): \"" << index->getStringOfNodeId(querySource) << "\" \"" 
+                      << index->getStringOfRelId(queryRel) << "\" ?" << std::endl;
+            std::cout << "  Direction: Predicting " << (queryDirIsTail ? "TAIL" : "HEAD") << std::endl;
+            std::cout << "  Combo Method: " << combo_noisyor_method << std::endl;
+            
+            auto& candRules = qResults.getCandRules();
+            std::cout << "  Total Candidates: " << candRules.size() << std::endl;
+            
+            if (numGroundTruth > 0 && groundTruthTargets != nullptr) {
+                std::cout << "  Ground Truth (" << numGroundTruth << " targets):" << std::endl;
+                for (int i = 0; i < numGroundTruth; i++) {
+                    std::cout << "    - ID: " << groundTruthTargets[i] 
+                              << ", String: \"" << index->getStringOfNodeId(groundTruthTargets[i]) << "\"" << std::endl;
+                }
+            }
+        }
+    }
 
+    // Apply combo adjustments if enabled
+    std::unordered_map<int, double> aggregatedSurprisal = qResults.getCandScores();
+    
+    if (combo_noisyor_method != "none" && rules.hasCombos()) {
+        auto& candRules = qResults.getCandRules();
+        auto& ruleHashToCombos = rules.getRuleHashToCombos();
+        
+        // Track ranking changes for ground truth
+        std::unordered_map<int, int> gtRanksBefore;
+        std::unordered_map<int, int> gtRanksAfter;
+        
+        if (shouldDebug && groundTruthTargets != nullptr) {
+            // Get ranking before combo
+            std::vector<std::pair<int, double>> beforeRanking(aggregatedSurprisal.begin(), aggregatedSurprisal.end());
+            std::sort(beforeRanking.begin(), beforeRanking.end(),
+                [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+                    return a.second > b.second;
+                });
+            
+            for (int i = 0; i < beforeRanking.size(); i++) {
+                int candId = beforeRanking[i].first;
+                for (int j = 0; j < numGroundTruth; j++) {
+                    if (candId == groundTruthTargets[j]) {
+                        gtRanksBefore[candId] = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Process each candidate
+        for (auto& candPair : candRules) {
+            int candidate = candPair.first;
+            std::vector<Rule*>& appliedRules = candPair.second;
+            
+            // Build combo2count for this candidate
+            std::unordered_map<Combo*, int> combo2count;
+            std::unordered_map<Combo*, std::vector<Rule*>> comboToRules;
+            std::vector<Combo*> fulfilledCombos;
+            
+            for (Rule* rule : appliedRules) {
+                size_t ruleHash = rule->getRuleHash();
+                
+                if (ruleHashToCombos.count(ruleHash)) {
+                    for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
+                        combo2count[combo]++;
+                        comboToRules[combo].push_back(rule);
+                        
+                        // Check if all member rules are present
+                        if (combo2count[combo] == combo->length) {
+                            fulfilledCombos.push_back(combo);
+                        }
+                    }
+                }
+            }
+            
+            if (shouldDebug && !fulfilledCombos.empty()) {
+                std::cout << "\n  Candidate " << candidate << " (" 
+                          << data.getIndex()->getStringOfNodeId(candidate) << "):" << std::endl;
+                std::cout << "    Applied Rules: " << appliedRules.size() << std::endl;
+                std::cout << "    Fulfilled Combos: " << fulfilledCombos.size() << std::endl;
+                std::cout << "    Surprisal before combo: " << aggregatedSurprisal[candidate] << std::endl;
+            }
+            
+            // Apply combo method
+            if (!fulfilledCombos.empty()) {
+                double originalSurprisal = aggregatedSurprisal[candidate];
+                double addedSurprisal = 0.0;
+                
+                if (combo_noisyor_method == "max") {
+                    // Find combo with maximum surprisal lift
+                    Combo* bestCombo = nullptr;
+                    double maxLift = -std::numeric_limits<double>::infinity();
+                    
+                    for (Combo* combo : fulfilledCombos) {
+                        double lift = combo->getSurprisalLift(&rules);
+                        if (lift > maxLift) {
+                            maxLift = lift;
+                            bestCombo = combo;
+                        }
+                    }
+                    
+                    if (bestCombo && maxLift > 0) {
+                        addedSurprisal = maxLift;
+                        
+                        if (shouldDebug) {
+                            std::cout << "    [max] Best Combo: lift=" << maxLift 
+                                      << ", conf=" << bestCombo->getConfidence()
+                                      << ", surprisal=" << bestCombo->getSurprisal() << std::endl;
+                            std::cout << "      Member rules (" << bestCombo->length << "):" << std::endl;
+                            for (size_t ruleHash : bestCombo->ruleHashes) {
+                                auto& hashToRule = rules.hashToRule;
+                                if (hashToRule.count(ruleHash)) {
+                                    Rule* memberRule = hashToRule[ruleHash];
+                                    std::cout << "        - " << memberRule->computeRuleString(data.getIndex())
+                                              << ", conf=" << memberRule->getConfidence()
+                                              << ", surprisal=" << memberRule->getSurprisal() << std::endl;
+                                }
+                            }
+                        }
+                    }
+                    
+                } else if (combo_noisyor_method == "greed") {
+                    // Sort combos by surprisal lift (descending)
+                    std::sort(fulfilledCombos.begin(), fulfilledCombos.end(),
+                        [&rules](Combo* a, Combo* b) {
+                            return a->getSurprisalLift(&rules) > b->getSurprisalLift(&rules);
+                        });
+                    
+                    // Greedy selection: mark used rules
+                    std::unordered_set<size_t> usedRuleHashes;
+                    std::vector<Combo*> selectedCombos;
+                    
+                    for (Combo* combo : fulfilledCombos) {
+                        double lift = combo->getSurprisalLift(&rules);
+                        if (lift <= 0) break; // Skip combos with non-positive lift
+                        
+                        // Check if any member rule is already used
+                        bool hasConflict = false;
+                        for (size_t ruleHash : combo->ruleHashes) {
+                            if (usedRuleHashes.count(ruleHash)) {
+                                hasConflict = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!hasConflict) {
+                            // Select this combo
+                            selectedCombos.push_back(combo);
+                            addedSurprisal += lift;
+                            
+                            // Mark all member rules as used
+                            for (size_t ruleHash : combo->ruleHashes) {
+                                usedRuleHashes.insert(ruleHash);
+                            }
+                        }
+                    }
+                    
+                    if (shouldDebug && !selectedCombos.empty()) {
+                        std::cout << "    [greed] Selected " << selectedCombos.size() << " combos:" << std::endl;
+                        for (size_t i = 0; i < selectedCombos.size(); i++) {
+                            Combo* combo = selectedCombos[i];
+                            std::cout << "      Combo #" << (i+1) << ": lift=" << combo->getSurprisalLift(&rules)
+                                      << ", conf=" << combo->getConfidence()
+                                      << ", length=" << combo->length << std::endl;
+                        }
+                        std::cout << "      Total added surprisal: " << addedSurprisal << std::endl;
+                    }
+                    
+                } else if (combo_noisyor_method == "all") {
+                    // Aggressive method: add all combo lifts (even if negative)
+                    std::vector<Combo*> positiveLiftCombos;
+                    
+                    for (Combo* combo : fulfilledCombos) {
+                        double lift = combo->getSurprisalLift(&rules);
+                        addedSurprisal += lift;
+                        if (lift > 0) {
+                            positiveLiftCombos.push_back(combo);
+                        }
+                    }
+                    
+                    if (shouldDebug && !fulfilledCombos.empty()) {
+                        std::cout << "    [All] Adding all " << fulfilledCombos.size() << " combo lifts:" << std::endl;
+                        std::cout << "      Combos with positive lift: " << positiveLiftCombos.size() << std::endl;
+                        std::cout << "      Total added surprisal: " << addedSurprisal << std::endl;
+                        if (positiveLiftCombos.size() <= 10) {
+                            for (size_t i = 0; i < positiveLiftCombos.size(); i++) {
+                                Combo* combo = positiveLiftCombos[i];
+                                std::cout << "        Combo #" << (i+1) << ": lift=" << combo->getSurprisalLift(&rules)
+                                          << ", conf=" << combo->getConfidence()
+                                          << ", length=" << combo->length << std::endl;
+                            }
+                        }
+                    }
+                }
+                
+                // Update aggregated surprisal
+                aggregatedSurprisal[candidate] = originalSurprisal + addedSurprisal;
+                
+                if (shouldDebug && addedSurprisal > 0) {
+                    std::cout << "    Surprisal after combo: " << aggregatedSurprisal[candidate] 
+                              << " (added: " << addedSurprisal << ")" << std::endl;
+                }
+            }
+        }
+        
+        // Track ground truth ranking changes
+        if (shouldDebug && groundTruthTargets != nullptr) {
+            std::vector<std::pair<int, double>> afterRanking(aggregatedSurprisal.begin(), aggregatedSurprisal.end());
+            std::sort(afterRanking.begin(), afterRanking.end(),
+                [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+                    return a.second > b.second;
+                });
+            
+            for (int i = 0; i < afterRanking.size(); i++) {
+                int candId = afterRanking[i].first;
+                if (gtRanksBefore.count(candId)) {
+                    gtRanksAfter[candId] = i + 1;
+                }
+            }
+            
+            std::cout << "\n  [GROUND TRUTH RANKING ANALYSIS]" << std::endl;
+            for (const auto& pair : gtRanksBefore) {
+                int gtId = pair.first;
+                int rankBefore = pair.second;
+                int rankAfter = gtRanksAfter[gtId];
+                int rankChange = rankBefore - rankAfter;
+                
+                std::cout << "    Ground Truth " << gtId << " (\""
+                          << data.getIndex()->getStringOfNodeId(gtId) << "\"):" << std::endl;
+                std::cout << "      Rank before combo: " << rankBefore << std::endl;
+                std::cout << "      Rank after combo: " << rankAfter << std::endl;
+                if (rankChange > 0) {
+                    std::cout << "      Result: IMPROVED (moved up by " << rankChange << " positions)" << std::endl;
+                } else if (rankChange < 0) {
+                    std::cout << "      Result: DEGRADED (moved down by " << (-rankChange) << " positions)" << std::endl;
+                } else {
+                    std::cout << "      Result: NO CHANGE" << std::endl;
+                }
+            }
+            
+            std::cout << "==========================================\n" << std::endl;
+        }
+    }
+
+   candScoresToSort.assign(aggregatedSurprisal.begin(), aggregatedSurprisal.end()); 
+
+   // Sort by aggregated surprisal (higher is better - lower failure probability)
    if (rank_tie_handling=="random"){
      std::sort(
         candScoresToSort.begin(),
@@ -288,8 +571,10 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
     throw std::runtime_error("Tie handling type not known. Please set to 'random' or 'frequency'");
    }
 
+// Convert from aggregated surprisal to final probability: 1 - exp(-aggregatedSurprisal)
 for (auto& pair: candScoresToSort){
-    pair.second = 1 - std::exp(-1*pair.second);
+    double aggregatedSurprisal = pair.second;
+    pair.second = 1.0 - std::exp(-aggregatedSurprisal);
 }
 
 }

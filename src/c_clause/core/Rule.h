@@ -48,6 +48,9 @@ public:
 	int getID();
 	double getConfidence(int nUnseen, bool exact=false);
 	double getConfidence(bool exact=false);
+	// Get surprisal: -ln(1-confidence)
+	double getSurprisal(int nUnseen, bool exact=false);
+	double getSurprisal(bool exact=false);
 	void setStats(int cpredicted, int predicted, bool exact=false);
 	std::array<int,2> getStats(bool exact=false);
 	std::string getRuleString();
@@ -56,6 +59,8 @@ public:
 	long long getBodyHash();
 	void computeBodyHash();
 	int getTargetRel();
+	// Get rule length (number of body atoms)
+	int getLength() const { return length; }
 	// se documentation in child classes
 	std::vector<int>& getRelations();
     std::vector<bool>& getDirections();

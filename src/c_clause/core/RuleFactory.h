@@ -42,6 +42,8 @@ public:
     void setCreateRuleXXc(bool ind);
     void setCreateCombo(bool ind);
     void setComboDebug(bool ind);
+    void setComboMaxDepth(int val);
+    void setComboMaxBranch(int val);
     void setNumUnseen(int val, std::string type);
 
     void setMinCorrect(int val, std::string type);
@@ -60,6 +62,9 @@ public:
     // Getter for combo num_unseen
     int getCombonumUnseen() const { return CombonumUnseen; }
     
+    // Getter for combo max depth
+    int getMmaxDepth() const { return MmaxDepth; }
+    
     // Set RuleStorage for combo parsing
     void setRuleStorage(class RuleStorage* storage) { ruleStorage = storage; }
 
@@ -73,6 +78,8 @@ private:
     int MminPreds = 1;
     double MminConf = 0.0;
     int CombonumUnseen = 0;
+    int MmaxDepth = -1;  // -1 means no limit
+    int MmaxBranch = -1; // -1 means no limit
 
     // ***Rule options***
     bool createRuleZ = true;

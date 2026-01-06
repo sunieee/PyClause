@@ -55,6 +55,9 @@ public:
     // Print loading statistics
     void printStatistics();
     
+    // Public access to hashToRule for combo surprisal lift calculation
+    std::unordered_map<size_t, Rule*> hashToRule;
+    
 private:
     // rules owns the rule objects
     // RelToRules keeps the rules sorted due to the set, iterating over all the rules would
@@ -74,8 +77,6 @@ private:
     std::vector<std::unique_ptr<Combo>> combos;
     // Inverted index: ruleHash -> combos containing this rule
     std::unordered_map<size_t, std::vector<Combo*>> ruleHashToCombos;
-    // Debug map: ruleHash -> rule
-    std::unordered_map<size_t, Rule*> hashToRule;
     // Mutex for thread-safe combo operations
     std::mutex comboMutex;  // Protects combos vector
     std::mutex comboIndexMutex;  // Protects ruleHashToCombos
