@@ -138,12 +138,42 @@ PYBIND11_MODULE(c_clause, m) {
 
     py::class_<Loader,  std::shared_ptr<Loader>>(m, "Loader") 
         .def(py::init<std::map<std::string, std::string>>(), py::arg("options"))
-        .def("load_rules", py::overload_cast<std::string>(&Loader::loadRules), py::arg("rules"))
-        .def("load_rules", py::overload_cast<std::vector<std::string>>(&Loader::loadRules), py::arg("rules"))
+        .def("load_rules", py::overload_cast<std::string, std::string>(&Loader::loadRules), 
+            py::arg("rules"), py::arg("jaccard") = "",
+            R"pbdoc(
+              Loads rules from file path. Optionally loads body Jaccard similarities.
+              Args:
+                  rules: Path to rules file
+                  jaccard: Optional path to JSON file with body pair Jaccard similarities
+            )pbdoc"
+        )
+        .def("load_rules", py::overload_cast<std::vector<std::string>, std::string>(&Loader::loadRules), 
+            py::arg("rules"), py::arg("jaccard") = "",
+            R"pbdoc(
+              Loads rules from string list. Optionally loads body Jaccard similarities.
+              Args:
+                  rules: List of rule strings
+                  jaccard: Optional path to JSON file with body pair Jaccard similarities
+            )pbdoc"
+        )
         .def(
             "load_rules",
-            py::overload_cast<std::vector<std::string>, std::vector<std::pair<int,int>>>(&Loader::loadRules),
-            py::arg("rules"), py::arg("stats")
+            py::overload_cast<std::vector<std::string>, std::vector<std::pair<int,int>>, std::string>(&Loader::loadRules),
+            py::arg("rules"), py::arg("stats"), py::arg("jaccard") = "",
+            R"pbdoc(
+              Loads rules with statistics. Optionally loads body Jaccard similarities.
+              Args:
+                  rules: List of rule strings
+                  stats: List of (support, predictions) pairs
+                  jaccard: Optional path to JSON file with body pair Jaccard similarities
+            )pbdoc"
+        )
+        .def("load_body_jaccard", &Loader::loadBodyJaccard, py::arg("filepath"),
+            R"pbdoc(
+              Loads body hash pair Jaccard similarities from JSON file.
+              Format: {"body1;body2": jaccard_value, ...}
+              The bodies are hashed and stored for use in rule clustering.
+            )pbdoc"
         )
         .def(
             "load_data",

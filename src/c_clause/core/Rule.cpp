@@ -86,14 +86,6 @@ std::string Rule::getRuleString(){
     throw std::runtime_error("Use computeString instead.");
 }
 
-long long Rule::getBodyHash(){
-    throw std::runtime_error("Not implemented yet");
-
-}
-void Rule::computeBodyHash(){
-    throw std::runtime_error("Not implemented yet");
-}
-
 std::string Rule::computeRuleString(Index* index){
     throw std::runtime_error("Not implemented yet");
 

@@ -277,20 +277,18 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
             std::cout << "  threadNum: " << threadNum << std::endl;
             std::cout << "  queryRel: " << queryRel << std::endl;
             std::cout << "  combo_noisyor_method: '" << combo_noisyor_method << "'" << std::endl;
-            std::cout << "  combo_noisyor_method != \"none\": " << (combo_noisyor_method != "none") << std::endl;
             std::cout << "  rules.hasCombos(): " << rules.hasCombos() << std::endl;
             std::cout << "  queryCount: " << queryCount << std::endl;
             std::cout << "  queryTopK: " << queryTopK << std::endl;
             std::cout << "  All conditions for debug: " 
                       << "thread0=" << (threadNum == 0)
                       << ", queryRel>=0=" << (queryRel >= 0)
-                      << ", method!=none=" << (combo_noisyor_method != "none")
                       << ", hasCombos=" << rules.hasCombos()
                       << ", count<topK=" << (queryCount < queryTopK) << std::endl;
         }
     }
     
-    if (threadNum == 0 && queryRel >= 0 && combo_noisyor_method != "none" && rules.hasCombos()) {
+    if (threadNum == 0 && queryRel >= 0  && rules.hasCombos()) {
         std::lock_guard<std::mutex> lock(debugMutex);
         if (queryCount < queryTopK) {
             shouldDebug = true;
@@ -319,6 +317,134 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
 
     // Apply combo adjustments if enabled
     std::unordered_map<int, double> aggregatedSurprisal = qResults.getCandScores();
+    
+    // Build ruleHashToComponentId mapping if clustering is enabled
+    std::unordered_map<size_t, int> ruleHashToComponentId;
+    bool clusteringEnabled = false;
+    
+    // Re-compute aggregatedSurprisal using connected component clustering based on body Jaccard similarity
+    if (!bodyHashPair2Jaccard.empty() && min_rule_jaccard <= 1.0) {
+        clusteringEnabled = true;
+        auto& candRules = qResults.getCandRules();
+        
+        // For each candidate, rebuild aggregatedSurprisal by selecting max surprisal from each connected component
+        for (auto& candPair : candRules) {
+            int candidate = candPair.first;
+            std::vector<Rule*>& appliedRules = candPair.second;
+            
+            if (appliedRules.empty()) continue;
+            
+            // Build adjacency graph for rules based on body Jaccard similarity
+            int numRules = appliedRules.size();
+            std::vector<std::vector<int>> adjList(numRules);
+            
+            // Build graph: connect rules with high Jaccard similarity
+            for (int i = 0; i < numRules; i++) {
+                size_t bodyHash1 = appliedRules[i]->getBodyHash();
+                
+                for (int j = i + 1; j < numRules; j++) {
+                    size_t bodyHash2 = appliedRules[j]->getBodyHash();
+                    
+                    // Create sorted pair key for lookup
+                    std::pair<size_t, size_t> key;
+                    if (bodyHash1 <= bodyHash2) {
+                        key = std::make_pair(bodyHash1, bodyHash2);
+                    } else {
+                        key = std::make_pair(bodyHash2, bodyHash1);
+                    }
+                    
+                    // Check if this pair exists and has high enough Jaccard
+                    auto it = bodyHashPair2Jaccard.find(key);
+                    if (it != bodyHashPair2Jaccard.end() && it->second >= min_rule_jaccard) {
+                        adjList[i].push_back(j);
+                        adjList[j].push_back(i);
+                    }
+                }
+            }
+            
+            // Find connected components using DFS
+            std::vector<bool> visited(numRules, false);
+            std::vector<std::vector<int>> components;
+            int componentId = 0;
+            
+            for (int i = 0; i < numRules; i++) {
+                if (!visited[i]) {
+                    std::vector<int> component;
+                    std::vector<int> stack = {i};
+                    
+                    while (!stack.empty()) {
+                        int node = stack.back();
+                        stack.pop_back();
+                        
+                        if (visited[node]) continue;
+                        visited[node] = true;
+                        component.push_back(node);
+                        
+                        // Map this rule to its component ID
+                        size_t ruleHash = appliedRules[node]->getRuleHash();
+                        ruleHashToComponentId[ruleHash] = componentId;
+                        
+                        for (int neighbor : adjList[node]) {
+                            if (!visited[neighbor]) {
+                                stack.push_back(neighbor);
+                            }
+                        }
+                    }
+                    
+                    components.push_back(component);
+                    componentId++;
+                }
+            }
+            
+            // For each connected component, select rule with maximum surprisal
+            double oldAggregatedSurprisal = aggregatedSurprisal[candidate];
+            double newAggregatedSurprisal = 0.0;
+            for (const auto& component : components) {
+                double maxSurprisal = 0.0;
+                for (int ruleIdx : component) {
+                    double surprisal = appliedRules[ruleIdx]->getSurprisal();
+                    maxSurprisal = std::max(maxSurprisal, surprisal);
+                }
+                newAggregatedSurprisal += maxSurprisal;
+            }
+            
+            // Update aggregatedSurprisal for this candidate
+            aggregatedSurprisal[candidate] = newAggregatedSurprisal;
+            
+            // Debug output for all candidates, but only show components with >1 rule
+            if (shouldDebug) {
+                // Count components with >1 rule
+                int multiRuleComponents = 0;
+                for (const auto& component : components) {
+                    if (component.size() > 1) {
+                        multiRuleComponents++;
+                    }
+                }
+                
+                if (multiRuleComponents > 0) {
+                    std::cout << "\n  [CLUSTERING] Candidate " << candidate << " (\""
+                              << data.getIndex()->getStringOfNodeId(candidate) << "\"):" << std::endl;
+                    std::cout << "    Old aggregated surprisal: " << oldAggregatedSurprisal << std::endl;
+                    std::cout << "    New aggregated surprisal: " << newAggregatedSurprisal << std::endl;
+                    std::cout << "    Total rules: " << numRules << ", Components with >1 rule: " << multiRuleComponents << std::endl;
+                    
+                    for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
+                        const auto& component = components[compIdx];
+                        if (component.size() > 1) {
+                            std::cout << "    Component (" << component.size() << " rules):" << std::endl;
+                            
+                            // Output all rules in this component
+                            for (int ruleIdx : component) {
+                                Rule* rule = appliedRules[ruleIdx];
+                                std::cout << "      - " << rule->computeRuleString(data.getIndex())
+                                          << ", Surprisal: " << rule->getSurprisal() << std::endl;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     if (combo_noisyor_method != "none" && rules.hasCombos()) {
         auto& candRules = qResults.getCandRules();
@@ -426,20 +552,35 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
                             return a->getSurprisalLift(&rules) > b->getSurprisalLift(&rules);
                         });
                     
-                    // Greedy selection: mark used rules
+                    // Greedy selection: mark used rules or components
                     std::unordered_set<size_t> usedRuleHashes;
+                    std::unordered_set<int> usedComponentIds;
                     std::vector<Combo*> selectedCombos;
                     
                     for (Combo* combo : fulfilledCombos) {
                         double lift = combo->getSurprisalLift(&rules);
                         if (lift <= 0) break; // Skip combos with non-positive lift
                         
-                        // Check if any member rule is already used
+                        // Check if any member rule's component is already used
                         bool hasConflict = false;
-                        for (size_t ruleHash : combo->ruleHashes) {
-                            if (usedRuleHashes.count(ruleHash)) {
-                                hasConflict = true;
-                                break;
+                        if (clusteringEnabled) {
+                            // Use component-level conflict detection
+                            for (size_t ruleHash : combo->ruleHashes) {
+                                auto it = ruleHashToComponentId.find(ruleHash);
+                                if (it != ruleHashToComponentId.end()) {
+                                    if (usedComponentIds.count(it->second)) {
+                                        hasConflict = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Use rule-level conflict detection
+                            for (size_t ruleHash : combo->ruleHashes) {
+                                if (usedRuleHashes.count(ruleHash)) {
+                                    hasConflict = true;
+                                    break;
+                                }
                             }
                         }
                         
@@ -448,9 +589,15 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
                             selectedCombos.push_back(combo);
                             addedSurprisal += lift;
                             
-                            // Mark all member rules as used
+                            // Mark all member rules/components as used
                             for (size_t ruleHash : combo->ruleHashes) {
                                 usedRuleHashes.insert(ruleHash);
+                                if (clusteringEnabled) {
+                                    auto it = ruleHashToComponentId.find(ruleHash);
+                                    if (it != ruleHashToComponentId.end()) {
+                                        usedComponentIds.insert(it->second);
+                                    }
+                                }
                             }
                         }
                     }

@@ -26,14 +26,23 @@
 // Handles Rules and Triples
 class Loader{
 public:
+    // Hash function for pair<size_t, size_t>
+    struct PairHash {
+        size_t operator()(const std::pair<size_t, size_t>& p) const {
+            return std::hash<size_t>{}(p.first) ^ (std::hash<size_t>{}(p.second) << 1);
+        }
+    };
+    
     Loader(std::map<std::string, std::string> options);
 
     template<class T>
     void loadData(T data, T filter, T target);
 
-    void loadRules(std::string rulePath);
-    void loadRules(std::vector<std::string> ruleStatsStrings);
-    void loadRules(std::vector<std::string> ruleStrings, std::vector<std::pair<int,int>> ruleStats);
+    void loadRules(std::string rulePath, std::string jaccardPath = "");
+    void loadRules(std::vector<std::string> ruleStatsStrings, std::string jaccardPath = "");
+    void loadRules(std::vector<std::string> ruleStrings, std::vector<std::pair<int,int>> ruleStats, std::string jaccardPath = "");
+    
+    void loadBodyJaccard(std::string filepath);
 
     void writeRules(std::string path);
     std::vector<std::string> getRuleLines();
@@ -60,6 +69,9 @@ public:
     bool getLoadedData();
     bool getLoadedRules();
     void setNumThreads(int threads);
+    
+    // Get body hash pair Jaccard map
+    const std::unordered_map<std::pair<size_t, size_t>, double, PairHash>& getBodyHashPair2Jaccard() const;
 
     //load a triple dataset (tab separated, 3 elements per line) conisting of tokens/strings into a std::vector<Triple> (Triple is std::array<int,3>)
     // note that all the strings need to be in the index already
@@ -83,6 +95,9 @@ private:
     bool verbose = true;
 
     int numThr=1;
+    
+    // Body hash pair to Jaccard similarity map
+    std::unordered_map<std::pair<size_t, size_t>, double, PairHash> bodyHashPair2Jaccard;
 };
 
 template<class T>

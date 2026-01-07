@@ -68,7 +68,7 @@ loader:
   load_u_d_rules: True
   # weight that is multiplied with the confidence
   # we use AnyBURL default here
-  d_weight: 0.1
+  d_weight: 1.0
   d_max_branching_factor: -1 #-1 for off
   d_num_unseen: 5
   d_min_support: -1
@@ -171,6 +171,11 @@ ranking_handler:
   # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
   # "all": add all combo lifts aggressively (most aggressive method)
   combo_noisyor_method: "none"
+
+  # Minimum Jaccard similarity threshold for rule body connectivity
+  # Used in connected component clustering for rule aggregation
+  # Set to >1 to disable body-based rule clustering
+  min_rule_jaccard: 0.9
 
   # dont add candidate proposals c for queries (h, r, ?) or (?, r, t) if
   # (h, r, c) or (c, r, t) exists in the KG given by the "data" argument of the loader

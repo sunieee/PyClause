@@ -53,6 +53,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
     rules_ptr.resize(ruleLines.size());
     std::vector<std::string> ruleStrings_vec(ruleLines.size());
     std::vector<size_t> ruleHashes_vec(ruleLines.size());
+    std::vector<size_t> bodyHashes_vec(ruleLines.size());
 
     #pragma omp parallel num_threads(numThreads)
     {
@@ -92,6 +93,21 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             size_t ruleHash = hasher(ruleString);
             ruleHashes_vec[i] = ruleHash;
             
+            // Compute hash for the body string (part after "<=" separator)
+            size_t bodyHash = 0;
+            size_t separatorPos = ruleString.find("<=");
+            if (separatorPos != std::string::npos && separatorPos + 2 < ruleString.length()) {
+                std::string bodyString = ruleString.substr(separatorPos + 2);
+                // Trim leading/trailing whitespace
+                size_t start = bodyString.find_first_not_of(" \t");
+                size_t end = bodyString.find_last_not_of(" \t");
+                if (start != std::string::npos && end != std::string::npos) {
+                    bodyString = bodyString.substr(start, end - start + 1);
+                }
+                bodyHash = hasher(bodyString);
+            }
+            bodyHashes_vec[i] = bodyHash;
+            
             std::unique_ptr<Rule> rule = nullptr;
             try
                 {
@@ -108,6 +124,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             if (rule){
                 rule->setStats(numPreds, numTrue, exact);
                 rule->setRuleHash(ruleHash);
+                rule->setBodyHash(bodyHash);
                 rules_ptr.at(i) = std::move(rule);              
             }
         }

@@ -63,6 +63,18 @@ public:
     void setComboNoisyorMethod(std::string method) {
         combo_noisyor_method = method;
     }
+    void setMinRuleJaccard(double threshold) {
+        min_rule_jaccard = threshold;
+    }
+    
+    // Transfer bodyHashPair2Jaccard from Loader
+    template<typename MapType>
+    void setBodyHashPair2Jaccard(const MapType& jaccardMap) {
+        bodyHashPair2Jaccard.clear();
+        for (const auto& pair : jaccardMap) {
+            bodyHashPair2Jaccard[pair.first] = pair.second;
+        }
+    }
 
 
     //triple scoring
@@ -160,6 +172,20 @@ private:
     // "max": add only the combo with maximum surprisal lift
     // "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
     std::string combo_noisyor_method = "none";
+
+    // Hash function for pair<size_t, size_t>
+    struct PairHash {
+        size_t operator()(const std::pair<size_t, size_t>& p) const {
+            return std::hash<size_t>{}(p.first) ^ (std::hash<size_t>{}(p.second) << 1);
+        }
+    };
+
+    // Jaccard similarity between rule body hash pairs
+    // Key: pair<bodyHash1, bodyHash2> (sorted), Value: Jaccard similarity
+    std::unordered_map<std::pair<size_t, size_t>, double, PairHash> bodyHashPair2Jaccard;
+    
+    // Minimum Jaccard similarity for rule connectivity
+    double min_rule_jaccard = 0.5;
 
 
     //***triple scoring options***

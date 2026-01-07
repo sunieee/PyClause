@@ -56,7 +56,7 @@ public:
 	std::string getRuleString();
 	// Maybe substitute getRuleString with this function
 	virtual std::string computeRuleString(Index* index);
-	long long getBodyHash();
+	
 	void computeBodyHash();
 	int getTargetRel();
 	// Get rule length (number of body atoms)
@@ -91,6 +91,10 @@ public:
 	// Hash of rule string (for combo rule identification)
 	size_t getRuleHash() const { return ruleHash; }
 	void setRuleHash(size_t hash) { ruleHash = hash; }
+	
+	// Hash of body string (for body comparison)
+	void setBodyHash(size_t hash) { bodyhash = hash; }
+	size_t getBodyHash() { return bodyhash; }
 
 	// only used for Uxxd Uxxc rules when particularly parsed from Anyburl rule files
 	virtual void setPredictHead(bool ind);
@@ -109,7 +113,7 @@ protected:
 	int predicted;
 	// correctly predicted
 	int cpredicted;
-	long long bodyhash;
+	size_t bodyhash;
 	// Hash of the rule string (for combo identification)
 	size_t ruleHash;
 	// possibly sampled confidence metrics

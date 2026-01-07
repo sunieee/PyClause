@@ -48,6 +48,16 @@ void RankingHandler::setOptionsFrontend(std::map<std::string, std::string> optio
 void RankingHandler::calculateRanking(std::shared_ptr<Loader> dHandler){
     index = dHandler->getIndex();
     ranker.clearAll();
+    
+    // Transfer bodyHashPair2Jaccard from Loader to ranker
+    auto& loaderJaccardMap = dHandler->getBodyHashPair2Jaccard();
+    if (!loaderJaccardMap.empty()) {
+        ranker.setBodyHashPair2Jaccard(loaderJaccardMap);
+        if (verbose) {
+            std::cout << "Transferred " << loaderJaccardMap.size() << " body hash pair Jaccard values to ranker" << std::endl;
+        }
+    }
+    
     if (collectRules){
         ranker.setSaveCandidateRules(true);
         // bind lifetime of rules to this object

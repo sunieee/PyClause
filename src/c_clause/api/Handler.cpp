@@ -34,6 +34,7 @@ void BackendHandler::setRankingOptions(std::map<std::string, std::string> option
         {"adapt_topk", [&ranker](std::string val) { ranker.setAdaptTopK(util::stringToBool(val)); }},
         {"queryTopK", [&ranker](std::string val) { ranker.setQueryTopK(std::stoi(val)); }},
         {"combo_noisyor_method", [&ranker](std::string val) { ranker.setComboNoisyorMethod(val); }},
+        {"min_rule_jaccard", [&ranker](std::string val) { ranker.setMinRuleJaccard(std::stod(val)); }},
 
     };
 
