@@ -28,6 +28,9 @@ void PredictionHandler::setOptions(std::map<std::string, std::string> options, A
         {"collect_explanations", [&scorer](std::string val) {scorer.setScoreCollectGroundings(util::stringToBool(val));}},
         {"num_top_rules", [&scorer](std::string val) {scorer.setScoreNumTopRules(std::stoi(val));}},
         {"num_threads", [&scorer](std::string val) {scorer.setNumThr(std::stoi(val));}},
+        {"queryTopK", [&scorer](std::string val) { scorer.setQueryTopK(std::stoi(val)); }},
+        {"combo_noisyor_method", [&scorer](std::string val) { scorer.setComboNoisyorMethod(val); }},
+        {"min_rule_jaccard", [&scorer](std::string val) { scorer.setMinRuleJaccard(std::stod(val)); }},
     };
 
     for (auto& handler : handlers) {

@@ -110,6 +110,46 @@ private:
     void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
     void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
 
+    // Helper functions for modularized strategies
+    void applyClusteringAdjustments(
+        std::unordered_map<int, double>& aggregatedSurprisal,
+        std::unordered_map<int, std::vector<Rule*>>& candRules,
+        bool shouldDebug,
+        TripleStorage& data
+    );
+    
+    void applyComboAdjustmentsNoisyor(
+        std::unordered_map<int, double>& aggregatedSurprisal,
+        std::unordered_map<int, std::vector<Rule*>>& candRules,
+        RuleStorage& rules,
+        bool shouldDebug,
+        TripleStorage& data,
+        const int* groundTruthTargets,
+        int numGroundTruth
+    );
+    
+    void applyComboAdjustmentsMaxplus(
+        std::unordered_map<int, std::vector<double>>& candToScoreList,
+        std::unordered_map<int, std::vector<Rule*>>& candToRules,
+        RuleStorage& rules,
+        bool shouldDebug,
+        TripleStorage& train,
+        Rule*& bestRule,
+        Combo*& bestCombo
+    );
+    
+    void debugOutputQueryInfo(
+        int queryCount,
+        int querySource,
+        int queryRel,
+        bool queryDirIsTail,
+        const int* groundTruthTargets,
+        int numGroundTruth,
+        const std::unordered_map<int, std::vector<Rule*>>& candRules,
+        RuleStorage& rules,
+        TripleStorage& data
+    );
+
 
 
     // tripleScores the first 3 elements is the triple head,rel,tail the last element is the score

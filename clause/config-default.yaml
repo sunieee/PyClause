@@ -68,7 +68,7 @@ loader:
   load_u_d_rules: True
   # weight that is multiplied with the confidence
   # we use AnyBURL default here
-  d_weight: 1.0
+  d_weight: 0.1
   d_max_branching_factor: -1 #-1 for off
   d_num_unseen: 5
   d_min_support: -1
@@ -277,6 +277,23 @@ prediction_handler:
   # note that as we are not calculating candidate rankings; selecting maxplus simply
   # results in "max-aggregation" scores
   aggregation_function: "maxplus"
+  
+  # Method for applying combo rules in noisyor aggregation (same as ranking_handler)
+  # "none": no combo support in noisyor
+  # "max": add only the combo with maximum surprisal lift
+  # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
+  # "all": add all combo lifts aggressively (most aggressive method)
+  combo_noisyor_method: "none"
+  
+  # Minimum Jaccard similarity threshold for rule body connectivity
+  # Used in connected component clustering for rule aggregation
+  # Set to >1 to disable body-based rule clustering
+  min_rule_jaccard: 0.9
+  
+  # Number of top queries/triples to output debug information for (thread 0 only)
+  # Set to 0 to disable debug output
+  queryTopK: 100
+  
   # for a given triple stop rule application if it was predicted by the
   # num_top_rules with the highest confidences
   # set to -1 to not apply any stopping criterion, e.g., to apply all rules
