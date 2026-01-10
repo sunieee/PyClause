@@ -116,7 +116,7 @@ Retrieving Results
 ~~~~~~~~~~~~~~~~~~
 
 The handler caches the results until the ``calculate_answers(..)`` function is invoked again.
-The QAHandler can output the calculated candidates and their aggregated scores, depending on the selected aggregation function with ``qa_handler.aggregation_function`` .
+The QAHandler can output the calculated candidates and their aggregated scores, depending on the selected aggregation function with ``combo_handler.aggregation_function`` .
 It can also output, for each candidate answer, the rules that predicted the candidate.
 
 

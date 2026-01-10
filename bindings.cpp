@@ -6,6 +6,7 @@
 #include "src/c_clause/api/QAHandler.h"
 #include "src/c_clause/api/Loader.h"
 #include "src/c_clause/api/PredictionHandler.h"
+#include "src/c_clause/api/ComboHandler.h"
 #include "src/c_clause/core/Types.h"
 #include "src/c_clause/tests.h"
 #include <string>
@@ -21,6 +22,26 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(c_clause, m) {
     // ***exposed backend functions that are usable in the frontend***
+
+    // ComboHandler - manages combo rule aggregation settings
+    py::class_<ComboHandler>(m, "ComboHandler")
+        .def(py::init<>())
+        .def("load_options_from_map", &ComboHandler::loadOptionsFromMap, 
+             py::arg("options"), py::arg("verbose") = false,
+             "Load combo handler options from a full options map")
+        .def("get_aggregation_function", &ComboHandler::getAggregationFunction)
+        .def("set_aggregation_function", &ComboHandler::setAggregationFunction, py::arg("func"))
+        .def("get_noisyor_positive_method", &ComboHandler::getNoisyorPositiveMethod)
+        .def("set_noisyor_positive_method", &ComboHandler::setNoisyorPositiveMethod, py::arg("method"))
+        .def("get_noisyor_negative_method", &ComboHandler::getNoisyorNegativeMethod)
+        .def("set_noisyor_negative_method", &ComboHandler::setNoisyorNegativeMethod, py::arg("method"))
+        .def("get_lift_ratio", &ComboHandler::getLiftRatio)
+        .def("set_lift_ratio", &ComboHandler::setLiftRatio, py::arg("ratio"))
+        .def("get_if_load", &ComboHandler::getIfLoad)
+        .def("set_if_load", &ComboHandler::setIfLoad, py::arg("load"))
+        .def("get_if_debug", &ComboHandler::getIfDebug)
+        .def("set_if_debug", &ComboHandler::setIfDebug, py::arg("debug"))
+    ;
 
     // RankingHandler()
     py::class_<RankingHandler>(m, "RankingHandler") 
@@ -138,41 +159,31 @@ PYBIND11_MODULE(c_clause, m) {
 
     py::class_<Loader,  std::shared_ptr<Loader>>(m, "Loader") 
         .def(py::init<std::map<std::string, std::string>>(), py::arg("options"))
-        .def("load_rules", py::overload_cast<std::string, std::string>(&Loader::loadRules), 
-            py::arg("rules"), py::arg("jaccard") = "",
+        .def("load_rules", py::overload_cast<std::string>(&Loader::loadRules), 
+            py::arg("rules"),
             R"pbdoc(
-              Loads rules from file path. Optionally loads body Jaccard similarities.
+              Loads rules from file path.
               Args:
                   rules: Path to rules file
-                  jaccard: Optional path to JSON file with body pair Jaccard similarities
             )pbdoc"
         )
-        .def("load_rules", py::overload_cast<std::vector<std::string>, std::string>(&Loader::loadRules), 
-            py::arg("rules"), py::arg("jaccard") = "",
+        .def("load_rules", py::overload_cast<std::vector<std::string>>(&Loader::loadRules), 
+            py::arg("rules"),
             R"pbdoc(
-              Loads rules from string list. Optionally loads body Jaccard similarities.
+              Loads rules from string list.
               Args:
                   rules: List of rule strings
-                  jaccard: Optional path to JSON file with body pair Jaccard similarities
             )pbdoc"
         )
         .def(
             "load_rules",
-            py::overload_cast<std::vector<std::string>, std::vector<std::pair<int,int>>, std::string>(&Loader::loadRules),
-            py::arg("rules"), py::arg("stats"), py::arg("jaccard") = "",
+            py::overload_cast<std::vector<std::string>, std::vector<std::pair<int,int>>>(&Loader::loadRules),
+            py::arg("rules"), py::arg("stats"),
             R"pbdoc(
-              Loads rules with statistics. Optionally loads body Jaccard similarities.
+              Loads rules with statistics.
               Args:
                   rules: List of rule strings
                   stats: List of (support, predictions) pairs
-                  jaccard: Optional path to JSON file with body pair Jaccard similarities
-            )pbdoc"
-        )
-        .def("load_body_jaccard", &Loader::loadBodyJaccard, py::arg("filepath"),
-            R"pbdoc(
-              Loads body hash pair Jaccard similarities from JSON file.
-              Format: {"body1;body2": jaccard_value, ...}
-              The bodies are hashed and stored for use in rule clustering.
             )pbdoc"
         )
         .def(

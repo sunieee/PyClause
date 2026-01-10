@@ -20,6 +20,9 @@
     ruleFactory = std::make_shared<RuleFactory>(index);
     setRuleOptions(options, *ruleFactory);
     rules = std::make_unique<RuleStorage>(index, ruleFactory);
+    
+    // Load ComboHandler configuration
+    comboHandler.loadOptionsFromMap(options, verbose);
  }
 
 bool Loader::getLoadedData(){
@@ -36,9 +39,8 @@ void Loader::setOptions(std::map<std::string, std::string> options){
 }
 
 
-void Loader::loadRules(std::string path, std::string jaccardPath){
+void Loader::loadRules(std::string path){
     rules->clearAll();
-    bodyHashPair2Jaccard.clear();
     if (!loadedData){
          throw std::runtime_error("Please load the data first with the the Handlers load data functionality.");
     }
@@ -48,43 +50,26 @@ void Loader::loadRules(std::string path, std::string jaccardPath){
         rules->readAnyTimeParFormat(path, false, this->numThr);
     }
     loadedRules = true;
-    
-    // Load Jaccard similarities if path is provided
-    if (!jaccardPath.empty()) {
-        loadBodyJaccard(jaccardPath);
-    }
 }
 
 
-void Loader::loadRules(std::vector<std::string> ruleStrings, std::string jaccardPath){
+void Loader::loadRules(std::vector<std::string> ruleStrings){
     rules->clearAll();
-    bodyHashPair2Jaccard.clear();
     if (!loadedData){
          throw std::runtime_error("Please load the data first with the the Handlers load data functionality.");
     }
     rules->readAnyTimeFromVec(ruleStrings, false);
     loadedRules = true;
-    
-    // Load Jaccard similarities if path is provided
-    if (!jaccardPath.empty()) {
-        loadBodyJaccard(jaccardPath);
-    }
 }
 
 
-void Loader::loadRules(std::vector<std::string> ruleStrings, std::vector<std::pair<int,int>> ruleStats, std::string jaccardPath){
+void Loader::loadRules(std::vector<std::string> ruleStrings, std::vector<std::pair<int,int>> ruleStats){
     rules->clearAll();
-    bodyHashPair2Jaccard.clear();
     if (!loadedData){
         throw std::runtime_error("Please load the data first with the the Handlers load data functionality.");
     }
     rules->readAnyTimeFromVecs(ruleStrings, ruleStats, false);
     loadedRules = true;
-    
-    // Load Jaccard similarities if path is provided
-    if (!jaccardPath.empty()) {
-        loadBodyJaccard(jaccardPath);
-    }
 }
 
 
@@ -202,12 +187,6 @@ void Loader::setRuleOptions(std::map<std::string, std::string> options, RuleFact
         // Combo
         {"load_combo", [&ruleFactory](std::string val) {ruleFactory.setCreateCombo(util::stringToBool(val));}},
         {"combo_debug", [&ruleFactory](std::string val) {ruleFactory.setComboDebug(util::stringToBool(val));}},
-        {"combo_min_support", [&ruleFactory](std::string val) {ruleFactory.setMinCorrect(std::stoi(val), "m");}},
-        {"combo_min_pred", [&ruleFactory](std::string val) {ruleFactory.setMinPred(std::stoi(val), "m");}},
-        {"combo_min_conf", [&ruleFactory](std::string val) {ruleFactory.setMinConf(std::stod(val), "m");}},
-        {"combo_num_unseen", [&ruleFactory](std::string val) {ruleFactory.setNumUnseen(std::stoi(val), "combo");}},
-        {"combo_max_depth", [&ruleFactory](std::string val) {ruleFactory.setComboMaxDepth(std::stoi(val));}},
-        {"combo_max_branch", [&ruleFactory](std::string val) {ruleFactory.setComboMaxBranch(std::stoi(val));}},
         // other
         {"num_threads", [this](std::string val) {this->setNumThreads(std::stoi(val));}},
         
@@ -271,6 +250,10 @@ std::shared_ptr<Index> Loader::getIndex(){
     return index;
 }
 
+ComboHandler& Loader::getComboHandler(){
+    return comboHandler;
+}
+
 // loads a file with tab separated string (token) triples
 std::unique_ptr<std::vector<Triple>> Loader::loadTriplesToVec(std::string path){
 
@@ -332,87 +315,6 @@ void Loader::setNumThreads(int num){
     }else{
         numThr = num;
     }
-}
-
-void Loader::loadBodyJaccard(std::string filepath){
-    std::ifstream file(filepath);
-    if (!file.is_open()) {
-        throw std::ios_base::failure("Could not open body Jaccard file: " + filepath);
-    }
-    
-    bodyHashPair2Jaccard.clear();
-    std::string line;
-    std::hash<std::string> hasher;
-    
-    // Simple JSON parsing for the specific format
-    // Format: "body1;body2": value,
-    while (std::getline(file, line)) {
-        // Remove leading/trailing whitespace
-        size_t start = line.find_first_not_of(" \t\r\n");
-        if (start == std::string::npos) continue;
-        line = line.substr(start);
-        
-        // Find the key (between quotes)
-        size_t keyStart = line.find('"');
-        if (keyStart == std::string::npos) continue;
-        size_t keyEnd = line.find('"', keyStart + 1);
-        if (keyEnd == std::string::npos) continue;
-        
-        std::string key = line.substr(keyStart + 1, keyEnd - keyStart - 1);
-        
-        // Find the value (after colon)
-        size_t colonPos = line.find(':', keyEnd);
-        if (colonPos == std::string::npos) continue;
-        
-        // Extract value (skip comma if present)
-        size_t valueStart = colonPos + 1;
-        size_t valueEnd = line.find_first_of(",}", valueStart);
-        if (valueEnd == std::string::npos) valueEnd = line.length();
-        
-        std::string valueStr = line.substr(valueStart, valueEnd - valueStart);
-        // Remove whitespace
-        valueStr.erase(std::remove_if(valueStr.begin(), valueStr.end(), ::isspace), valueStr.end());
-        
-        try {
-            double value = std::stod(valueStr);
-            
-            // Parse the key "body1;body2" and compute hashes
-            size_t semicolonPos = key.find(';');
-            if (semicolonPos != std::string::npos) {
-                std::string body1 = key.substr(0, semicolonPos);
-                std::string body2 = key.substr(semicolonPos + 1);
-                
-                // Trim whitespace from body strings
-                body1.erase(std::remove_if(body1.begin(), body1.end(), ::isspace), body1.end());
-                body2.erase(std::remove_if(body2.begin(), body2.end(), ::isspace), body2.end());
-                
-                // Compute hashes
-                size_t hash1 = hasher(body1);
-                size_t hash2 = hasher(body2);
-                
-                // Store with sorted order
-                std::pair<size_t, size_t> hashPair;
-                if (hash1 <= hash2) {
-                    hashPair = std::make_pair(hash1, hash2);
-                } else {
-                    hashPair = std::make_pair(hash2, hash1);
-                }
-                
-                bodyHashPair2Jaccard[hashPair] = value;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Could not parse value for key: " << key << std::endl;
-        }
-    }
-    
-    file.close();
-    if (verbose) {
-        std::cout << "Loaded " << bodyHashPair2Jaccard.size() << " body hash pair Jaccard similarities from " << filepath << std::endl;
-    }
-}
-
-const std::unordered_map<std::pair<size_t, size_t>, double, Loader::PairHash>& Loader::getBodyHashPair2Jaccard() const {
-    return bodyHashPair2Jaccard;
 }
 
 

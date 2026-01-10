@@ -89,11 +89,6 @@ loader:
   z_min_preds: -1
   z_min_conf: 0.0001
 
-  ## Combo rules
-  # Laplace smoothing parameter for combo rules
-  # combo_confidence = numTrue / (numPreds + combo_num_unseen)
-  combo_num_unseen: 5
-
   ## U_xxc rules
   # parsable example: "h(X,X) <= b1(X,c)" (c being an entity in the graph)
   # has always length 1
@@ -112,36 +107,8 @@ loader:
   xxd_min_preds: -1
   xxd_min_conf: 0.0001
 
-  ## Combo rules
-  # parsable example: "h(X,Y) <= b1(X,Z), b2(Z,Y); b3(X,A), b4(A,Y)"
-  # combines 2-3 rules with semicolon separator
-  # combo confidence must be higher than individual rule confidences
-  load_combo: True
-  combo_debug: False
-  # minimum number of predictions for combo rule (-1 for no filter)
-  combo_min_pred: -1
-  # minimum support (correct predictions) for combo rule (-1 for no filter)
-  combo_min_support: -1
-  # minimum confidence for combo rule
-  combo_min_conf: 0.0001
-  # maximum branch (number of member rules in combo, e.g., 2 or 3) (-1 for no filter)
-  combo_max_branch: -1
-  # maximum depth (max body atoms across member rules) (-1 for no filter)
-  combo_max_depth: 2
-  
-  # DEPRECATED: Use ranking_handler.combo_noisyor_method instead
-  # Method for applying combo rules in noisyor aggregation (kept for backward compatibility)
-  # "none": no combo support in noisyor
-  # "max": add only the combo with maximum surprisal lift
-  # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
-  # "all": add all combo lifts aggressively (most aggressive method)
-  combo_noisyor_method: "none"
-
 
 # calculates rankings based on the "target" KG loaded into DataLoader
-# e.g. target argument from loader.load_data(data=.., filter=.., target=..)
-# candidate rankings are calculated for every query (s, p, ?) and (?, p, o)
-# of every triple (s, p, o) from "target" 
 ranking_handler:
   # whether to cache the rules that predicted the query candidates,
   # can be retrieved with handler.get_rules(bool, string: "head" or "tail")
@@ -154,28 +121,6 @@ ranking_handler:
   # e.g., when there are 90 candidates already calculated and the next
   # rule predicts 30 new candidates, we allow a maximum of 120 candidates
   topk: 100
-  queryTopK: 100
-  # select from "maxplus" / "noisyor"
-  # maxplus scores of a ranking will be of the highest predicting rule
-  # candidate discrimination is based on comparing the sequences of predicting
-  # rules confidences lexicographically; note that the outputed scores
-  # are only the ones of the rule with the highest confidence 
-  # noisyor scores and ranking is based on sorting the noisy-or product
-  # the noisy-or sorting is based on -\sum_i(log(1-conf_i)) and transformed
-  # before outputted; this mitigates floating point considerations 
-  aggregation_function: "maxplus"
-  
-  # Method for applying combo rules in noisyor aggregation
-  # "none": no combo support in noisyor
-  # "max": add only the combo with maximum surprisal lift
-  # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
-  # "all": add all combo lifts aggressively (most aggressive method)
-  combo_noisyor_method: "none"
-
-  # Minimum Jaccard similarity threshold for rule body connectivity
-  # Used in connected component clustering for rule aggregation
-  # Set to >1 to disable body-based rule clustering
-  min_rule_jaccard: 0.9
 
   # dont add candidate proposals c for queries (h, r, ?) or (?, r, t) if
   # (h, r, c) or (c, r, t) exists in the KG given by the "data" argument of the loader
@@ -238,8 +183,6 @@ qa_handler:
   # number of candidates to calculate for a query
   # see ranking_handler for detailed description, it behaves identical
   topk: 100
-  # select from "maxplus" / "noisyor"; see ranking handler
-  aggregation_function: "maxplus"
 
   # dont add candidate proposals c for queries (h, r, ?) or (?, r, t) if
   # (h, r, c) or (c, r, t) exists in the KG given by the "data" argument of the loader
@@ -273,26 +216,6 @@ rules_handler:
 # predicting rules + their groundings (explanations)
 prediction_handler:
   collect_explanations: False
-  # select from "maxplus" / "noisyor"
-  # note that as we are not calculating candidate rankings; selecting maxplus simply
-  # results in "max-aggregation" scores
-  aggregation_function: "maxplus"
-  
-  # Method for applying combo rules in noisyor aggregation (same as ranking_handler)
-  # "none": no combo support in noisyor
-  # "max": add only the combo with maximum surprisal lift
-  # "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
-  # "all": add all combo lifts aggressively (most aggressive method)
-  combo_noisyor_method: "none"
-  
-  # Minimum Jaccard similarity threshold for rule body connectivity
-  # Used in connected component clustering for rule aggregation
-  # Set to >1 to disable body-based rule clustering
-  min_rule_jaccard: 0.9
-  
-  # Number of top queries/triples to output debug information for (thread 0 only)
-  # Set to 0 to disable debug output
-  queryTopK: 100
   
   # for a given triple stop rule application if it was predicted by the
   # num_top_rules with the highest confidences
@@ -305,6 +228,52 @@ prediction_handler:
   num_threads: -1 #-1 for ALL available threads
   # set to False to display less output information
   verbose: True
+
+
+# Combo rule aggregation handler (shared by ranking_handler, qa_handler and prediction_handler)
+# Controls how combo rules are processed and the aggregation function used
+combo_handler:
+  # Whether to load combo rules from rule files
+  # If False, combo rules will be ignored during rule loading
+  if_load: True
+  
+  # Enable debug output for combo rule loading and processing
+  # Useful for troubleshooting combo rule issues
+  if_debug: False
+  
+  # Aggregation function: "maxplus" or "noisyor"
+  # maxplus: max-aggregation (uses highest rule confidence only)
+  #   - Ranking discrimination based on lexicographic comparison of rule confidence sequences
+  #   - Output scores are from the rule with highest confidence
+  # noisyor: noisy-or aggregation (combines multiple rule confidences)
+  #   - Sorting based on -sum_i(log(1-conf_i)) and transformed before output
+  #   - Mitigates floating point considerations
+  #   - Works with combo rules for synergy/conflict handling
+  aggregation_function: "maxplus"
+  
+  # Positive method: how to aggregate synergistic (positive lift) combo edges
+  # Options: "none", "mst", "matching1", "matching2"
+  #   - none: no positive synergy from combos
+  #   - mst: maximum spanning tree (allows tree structure, may create hubs)
+  #   - matching1: maximum matching (b=1, each rule connects to at most 1 other)
+  #   - matching2: b-matching (b=2, each rule connects to at most 2 others, more balanced)
+  noisyor_positive_method: "none"
+  
+  # Negative method: how to handle conflicting (negative lift) combo edges
+  # Options: "none", "prune", "cluster"
+  #   - none: keep all rules (no filtering)
+  #   - prune: remove weaker rules in each negative edge (simple domination)
+  #   - cluster: group by connected components, keep strongest in each cluster
+  noisyor_negative_method: "none"
+  
+  # Scaling factor (alpha) for positive synergy lift values
+  # Final synergy contribution = alpha * sum(selected_positive_lifts)
+  # Recommended: 0.5-1.0 to control synergy strength
+  lift_ratio: 1.0
+  
+  # Number of top queries/triples to output debug information for (thread 0 only)
+  # Set to 0 to disable debug output, useful for development and debugging
+  query_topk: 100
 
 
 ## clause options ############################################################

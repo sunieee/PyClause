@@ -844,8 +844,7 @@ def test_noisy_triple_scoring():
     # both set to -1 to not apply any stopping critertion (otherwise scores might vary a bit)
     options.set("ranking_handler.disc_at_least", -1)
     options.set("prediction_handler.num_top_rules", -1)
-    options.set("ranking_handler.aggregation_function", "noisyor")
-    options.set("prediction_handler.aggregation_function", "noisyor")
+    options.set("combo_handler.aggregation_function", "noisyor")
     options.set("prediction_handler.collect_explanations", True)
     
     options.set("loader.load_u_xxd_rules", False)
@@ -943,7 +942,7 @@ def test_noisy_or():
     
     options.set("qa_handler.topk", 300)
     options.set("qa_handler.disc_at_least", -1)
-    options.set("qa_handler.aggregation_function", "noisyor")
+    options.set("combo_handler.aggregation_function", "noisyor")
     options.set("qa_handler.num_top_rules", 5)
     qa_5 = c_clause.QAHandler(options.get("qa_handler"))
 
@@ -962,11 +961,11 @@ def test_noisy_or():
     tail_queries = [ (tr[0], tr[1]) for tr in triples ]
 
 
-    options.set("prediction_handler.aggregation_function", "noisyor")
+    options.set("combo_handler.aggregation_function", "noisyor")
     options.set("prediction_handler.num_top_rules" , -1)
     scorer_all = c_clause.PredictionHandler(options.get("prediction_handler"))
 
-    options.set("prediction_handler.aggregation_function", "noisyor")
+    options.set("combo_handler.aggregation_function", "noisyor")
     options.set("prediction_handler.num_top_rules" , 5)
     scorer_5 = c_clause.PredictionHandler(options.get("prediction_handler"))
 

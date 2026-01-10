@@ -84,6 +84,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             std::string ruleString = splitline[3];
             int numPreds = std::stoi(splitline[0]);
             int numTrue = std::stoi(splitline[1]);
+            double lift = std::stod(splitline[2]);  // Third column contains lift for combos
             
             // Store rule string for later collection
             ruleStrings_vec[i] = ruleString;
@@ -111,7 +112,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             std::unique_ptr<Rule> rule = nullptr;
             try
                 {
-                    rule = ruleFactory->parseAnytimeRule(ruleString, numPreds, numTrue);
+                    rule = ruleFactory->parseAnytimeRule(ruleString, numPreds, numTrue, lift);
                 }
             catch(const std::exception& e)
                 {
@@ -136,9 +137,6 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
     int currID = 0;
     std::unordered_set<size_t> seenHashes;
     
-    int maxDepth = ruleFactory->getMmaxDepth();
-    int filteredComboRules = 0;
-    
     for (int i=0; i<rules_ptr.size(); i++){
         if (rules_ptr[i]){
             size_t ruleHash = ruleHashes_vec[i];
@@ -157,21 +155,11 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             // Store for debugging: hash to rule mapping
             hashToRule[ruleHash] = rules_ptr[i].get();
             
-            // Filter combo index by max_depth: remove rules with length > maxDepth
-            if (maxDepth > 0 && rules_ptr[i]->getLength() > maxDepth) {
-                ruleHashToCombos.erase(ruleHash);
-                filteredComboRules++;
-            }
-            
             // must be done after id is set
             relToRules[rules_ptr[i]->getTargetRel()].insert(rules_ptr[i].get());
             currID += 1;
             rules.push_back(std::move(rules_ptr[i]));
         }
-    }
-    
-    if (filteredComboRules > 0) {
-        std::cout << "Filtered " << filteredComboRules << " rules from combo index (length > " << maxDepth << ")" << std::endl;
     }
     
     std::cout<<"Loaded and indexed "<<currID<<" rules."<<std::endl;
@@ -196,9 +184,6 @@ void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
         std::cerr.flush();
         throw std::runtime_error("Null combo pointer");
     }
-    
-    // Set the Laplace smoothing parameter from RuleFactory
-    combo->setNumUnseen(ruleFactory->getCombonumUnseen());
     
     // Add to storage with mutex protection
     try {

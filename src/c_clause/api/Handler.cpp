@@ -23,7 +23,6 @@ void BackendHandler::setRankingOptions(std::map<std::string, std::string> option
 
     std::vector<OptionHandler> handlers = {
         {"topk", [&ranker](std::string val) { ranker.setTopK(std::stoi(val)); }},
-        {"aggregation_function", [&ranker](std::string val) { ranker.setAggregationFunc(val); }},
         {"disc_at_least", [&ranker](std::string val) { ranker.setDiscAtLeast(std::stoi(val)); }},
         {"hard_stop_at", [&ranker](std::string val) { ranker.setNumPreselect(std::stoi(val)); }},
         {"num_top_rules", [&ranker](std::string val) {ranker.setScoreNumTopRules(std::stoi(val));}},
@@ -32,17 +31,17 @@ void BackendHandler::setRankingOptions(std::map<std::string, std::string> option
         {"tie_handling", [&ranker](std::string val) { ranker.setTieHandling(val); }},
         {"num_threads", [&ranker](std::string val) { ranker.setNumThr(std::stoi(val)); }},
         {"adapt_topk", [&ranker](std::string val) { ranker.setAdaptTopK(util::stringToBool(val)); }},
-        {"queryTopK", [&ranker](std::string val) { ranker.setQueryTopK(std::stoi(val)); }},
-        {"combo_noisyor_method", [&ranker](std::string val) { ranker.setComboNoisyorMethod(val); }},
-        {"min_rule_jaccard", [&ranker](std::string val) { ranker.setMinRuleJaccard(std::stod(val)); }},
 
     };
+    
+    // NOTE: ComboHandler configuration is now loaded from Loader, not from options
+    // This ensures all handlers (RankingHandler, QAHandler, PredictionHandler) share the same configuration
 
     //maxplus vs num_top_rules
-    auto aggFunc = options.find("aggregation_function");
     auto numTopRules = options.find("num_top_rules");
-    if (aggFunc != options.end() && numTopRules != options.end()) {
-        if (aggFunc->second == "maxplus" && numTopRules->second != "-1") {
+    if (numTopRules != options.end()) {
+        std::string aggFunc = ranker.getComboHandler().getAggregationFunction();
+        if (aggFunc == "maxplus" && numTopRules->second != "-1") {
             std::cerr <<
              "Warning: Aggregation function is set to 'maxplus' and 'num_top_rules' is not -1. "
              "Please only do this when you know what you are doing. Otherwise set num_top_rules to -1. "

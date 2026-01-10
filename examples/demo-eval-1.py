@@ -22,7 +22,7 @@ rules = f"{get_base_dir()}/data/wnrr/anyburl-rules-c5-3600"
 ranking_file = f"{get_base_dir()}/local/ranking-wnrr.txt"
 
 options = Options()
-options.set("ranking_handler.aggregation_function", "maxplus")
+options.set("combo_handler.aggregation_function", "maxplus")
 options.set("ranking_handler.topk", 100)
 options.set("loader.load_u_d_rules", False)
 options.set("loader.load_u_xxc_rules", False)

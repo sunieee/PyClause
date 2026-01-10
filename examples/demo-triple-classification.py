@@ -136,7 +136,7 @@ target = f"data/{dataset}/test.txt"
 rules = args.rules if args.rules else f"data/rules/{dataset}.txt"
 
 options = Options()
-options.set("prediction_handler.aggregation_function", args.aggregation_function)
+options.set("combo_handler.aggregation_function", args.aggregation_function)
 options.set("prediction_handler.num_top_rules", args.num_top_rules)
 options.set("prediction_handler.combo_noisyor_method", args.combo_noisyor_method)
 options.set("prediction_handler.queryTopK", 10)  # Enable debug output for first 10 triples

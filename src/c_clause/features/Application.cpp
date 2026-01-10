@@ -7,6 +7,7 @@
 #include <functional>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 
 #include "Application.h"
@@ -37,7 +38,10 @@ void ApplicationHandler::debugOutputQueryInfo(
     std::cout << "  Query (Strings): \"" << index->getStringOfNodeId(querySource) << "\" \"" 
               << index->getStringOfRelId(queryRel) << "\" ?" << std::endl;
     std::cout << "  Direction: Predicting " << (queryDirIsTail ? "TAIL" : "HEAD") << std::endl;
-    std::cout << "  Combo Method: " << combo_noisyor_method << std::endl;
+    std::cout << "  Combo Positive Method: " << comboHandler.getNoisyorPositiveMethod() << std::endl;
+    std::cout << "  Combo Negative Method: " << comboHandler.getNoisyorNegativeMethod() << std::endl;
+    std::cout << "  Combo Lift Ratio: " << comboHandler.getLiftRatio() << std::endl;
+    std::cout << "  Aggregation Function: " << comboHandler.getAggregationFunction() << std::endl;
     
     std::cout << "  Total Candidates: " << candRules.size() << std::endl;
     
@@ -46,128 +50,6 @@ void ApplicationHandler::debugOutputQueryInfo(
         for (int i = 0; i < numGroundTruth; i++) {
             std::cout << "    - ID: " << groundTruthTargets[i] 
                       << ", String: \"" << index->getStringOfNodeId(groundTruthTargets[i]) << "\"" << std::endl;
-        }
-    }
-}
-
-void ApplicationHandler::applyClusteringAdjustments(
-    std::unordered_map<int, double>& aggregatedSurprisal,
-    std::unordered_map<int, std::vector<Rule*>>& candRules,
-    bool shouldDebug,
-    TripleStorage& data
-) {
-    if (bodyHashPair2Jaccard.empty() || min_rule_jaccard > 1.0) {
-        return;
-    }
-    
-    for (auto& candPair : candRules) {
-        int candidate = candPair.first;
-        std::vector<Rule*>& appliedRules = candPair.second;
-        
-        if (appliedRules.empty()) continue;
-        
-        // Build adjacency graph for rules based on body Jaccard similarity
-        int numRules = appliedRules.size();
-        std::vector<std::vector<int>> adjList(numRules);
-        
-        // Build graph: connect rules with high Jaccard similarity
-        for (int i = 0; i < numRules; i++) {
-            size_t bodyHash1 = appliedRules[i]->getBodyHash();
-            
-            for (int j = i + 1; j < numRules; j++) {
-                size_t bodyHash2 = appliedRules[j]->getBodyHash();
-                
-                // Create sorted pair key for lookup
-                std::pair<size_t, size_t> key;
-                if (bodyHash1 <= bodyHash2) {
-                    key = std::make_pair(bodyHash1, bodyHash2);
-                } else {
-                    key = std::make_pair(bodyHash2, bodyHash1);
-                }
-                
-                // Check if this pair exists and has high enough Jaccard
-                auto it = bodyHashPair2Jaccard.find(key);
-                if (it != bodyHashPair2Jaccard.end() && it->second >= min_rule_jaccard) {
-                    adjList[i].push_back(j);
-                    adjList[j].push_back(i);
-                }
-            }
-        }
-        
-        // Find connected components using DFS
-        std::vector<bool> visited(numRules, false);
-        std::vector<std::vector<int>> components;
-        
-        for (int i = 0; i < numRules; i++) {
-            if (!visited[i]) {
-                std::vector<int> component;
-                std::vector<int> stack = {i};
-                
-                while (!stack.empty()) {
-                    int node = stack.back();
-                    stack.pop_back();
-                    
-                    if (visited[node]) continue;
-                    visited[node] = true;
-                    component.push_back(node);
-                    
-                    for (int neighbor : adjList[node]) {
-                        if (!visited[neighbor]) {
-                            stack.push_back(neighbor);
-                        }
-                    }
-                }
-                
-                components.push_back(component);
-            }
-        }
-        
-        // For each connected component, select rule with maximum surprisal
-        double oldAggregatedSurprisal = aggregatedSurprisal[candidate];
-        double newAggregatedSurprisal = 0.0;
-        for (const auto& component : components) {
-            double maxSurprisal = 0.0;
-            for (int ruleIdx : component) {
-                double surprisal = appliedRules[ruleIdx]->getSurprisal();
-                maxSurprisal = std::max(maxSurprisal, surprisal);
-            }
-            newAggregatedSurprisal += maxSurprisal;
-        }
-        
-        // Update aggregatedSurprisal for this candidate
-        aggregatedSurprisal[candidate] = newAggregatedSurprisal;
-        
-        // Debug output for all candidates, but only show components with >1 rule
-        if (shouldDebug) {
-            // Count components with >1 rule
-            int multiRuleComponents = 0;
-            for (const auto& component : components) {
-                if (component.size() > 1) {
-                    multiRuleComponents++;
-                }
-            }
-            
-            if (multiRuleComponents > 0) {
-                std::cout << "\n  [CLUSTERING] Candidate " << candidate << " (\""
-                          << data.getIndex()->getStringOfNodeId(candidate) << "\"):" << std::endl;
-                std::cout << "    Old aggregated surprisal: " << oldAggregatedSurprisal << std::endl;
-                std::cout << "    New aggregated surprisal: " << newAggregatedSurprisal << std::endl;
-                std::cout << "    Total rules: " << numRules << ", Components with >1 rule: " << multiRuleComponents << std::endl;
-                
-                for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
-                    const auto& component = components[compIdx];
-                    if (component.size() > 1) {
-                        std::cout << "    Component (" << component.size() << " rules):" << std::endl;
-                        
-                        // Output all rules in this component
-                        for (int ruleIdx : component) {
-                            Rule* rule = appliedRules[ruleIdx];
-                            std::cout << "      - " << rule->computeRuleString(data.getIndex())
-                                      << ", Surprisal: " << rule->getSurprisal() << std::endl;
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -181,7 +63,15 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
     const int* groundTruthTargets,
     int numGroundTruth
 ) {
-    if (combo_noisyor_method == "none" || !rules.hasCombos()) {
+    // Check if we need to do anything
+    bool hasNegativeMethod = (comboHandler.getNoisyorNegativeMethod() != "none");
+    bool hasPositiveMethod = (comboHandler.getNoisyorPositiveMethod() != "none");
+    
+    if (!hasNegativeMethod && !hasPositiveMethod) {
+        return;
+    }
+    
+    if (!rules.hasCombos()) {
         return;
     }
     
@@ -215,20 +105,30 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
         int candidate = candPair.first;
         std::vector<Rule*>& appliedRules = candPair.second;
         
-        // Build combo2count for this candidate
+        if (appliedRules.empty()) continue;
+        
+        // ========== Step 0: Build local graph ==========
+        // Build rule index for efficient lookup
+        std::unordered_map<size_t, Rule*> hashToAppliedRule;
+        std::unordered_map<size_t, int> hashToIndex;
+        std::vector<size_t> indexToHash(appliedRules.size());
+        
+        for (size_t i = 0; i < appliedRules.size(); i++) {
+            size_t ruleHash = appliedRules[i]->getRuleHash();
+            hashToAppliedRule[ruleHash] = appliedRules[i];
+            hashToIndex[ruleHash] = i;
+            indexToHash[i] = ruleHash;
+        }
+        
+        // Build combo2count and find fulfilled combos
         std::unordered_map<Combo*, int> combo2count;
-        std::unordered_map<Combo*, std::vector<Rule*>> comboToRules;
         std::vector<Combo*> fulfilledCombos;
         
         for (Rule* rule : appliedRules) {
             size_t ruleHash = rule->getRuleHash();
-            
             if (ruleHashToCombos.count(ruleHash)) {
                 for (Combo* combo : ruleHashToCombos.at(ruleHash)) {
                     combo2count[combo]++;
-                    comboToRules[combo].push_back(rule);
-                    
-                    // Check if all member rules are present
                     if (combo2count[combo] == combo->length) {
                         fulfilledCombos.push_back(combo);
                     }
@@ -236,133 +136,332 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
             }
         }
         
-        if (shouldDebug && !fulfilledCombos.empty()) {
+        // Separate positive and negative edges
+        // E+ = {(i,j) | lift_ij > 0 and i,j in R}
+        // E- = {(i,j) | lift_ij < 0 and i,j in R}
+        struct Edge {
+            int i, j;           // indices in appliedRules
+            size_t hash1, hash2; // rule hashes
+            double lift;
+            Combo* combo;
+        };
+        
+        std::vector<Edge> positiveEdges;
+        std::vector<Edge> negativeEdges;
+        
+        for (Combo* combo : fulfilledCombos) {
+            double lift = combo->getSurprisalLift();
+            
+            if (hashToIndex.count(combo->ruleHash1) && hashToIndex.count(combo->ruleHash2)) {
+                Edge edge;
+                edge.hash1 = combo->ruleHash1;
+                edge.hash2 = combo->ruleHash2;
+                edge.i = hashToIndex[combo->ruleHash1];
+                edge.j = hashToIndex[combo->ruleHash2];
+                edge.lift = lift;
+                edge.combo = combo;
+                
+                if (lift > 0) {
+                    positiveEdges.push_back(edge);
+                } else if (lift < 0) {
+                    negativeEdges.push_back(edge);
+                }
+            }
+        }
+        
+        if (shouldDebug && (!positiveEdges.empty() || !negativeEdges.empty())) {
             std::cout << "\n  Candidate " << candidate << " (" 
                       << data.getIndex()->getStringOfNodeId(candidate) << "):" << std::endl;
             std::cout << "    Applied Rules: " << appliedRules.size() << std::endl;
             std::cout << "    Fulfilled Combos: " << fulfilledCombos.size() << std::endl;
-            std::cout << "    Surprisal before combo: " << aggregatedSurprisal[candidate] << std::endl;
+            std::cout << "    Positive Edges (E+): " << positiveEdges.size() << std::endl;
+            std::cout << "    Negative Edges (E-): " << negativeEdges.size() << std::endl;
+            std::cout << "    Original Surprisal: " << aggregatedSurprisal[candidate] << std::endl;
         }
         
-        // Apply combo method
-        if (!fulfilledCombos.empty()) {
-            double originalSurprisal = aggregatedSurprisal[candidate];
-            double addedSurprisal = 0.0;
+        // ========== Apply Negative Method: Determine retained rules R' ==========
+        std::unordered_set<int> retainedIndices;
+        for (size_t i = 0; i < appliedRules.size(); i++) {
+            retainedIndices.insert(i);
+        }
+        
+        if (comboHandler.getNoisyorNegativeMethod() == "none") {
+            // Keep all rules, do nothing
             
-            if (combo_noisyor_method == "max") {
-                // Find combo with maximum surprisal lift
-                Combo* bestCombo = nullptr;
-                double maxLift = -std::numeric_limits<double>::infinity();
+        } else if (comboHandler.getNoisyorNegativeMethod() == "prune") {
+            // ========== Prune Method: Domination Pruning ==========
+            // For each negative edge, delete the weaker rule
+            
+            std::unordered_set<int> deleteList;
+            
+            for (const Edge& edge : negativeEdges) {
+                double w_i = appliedRules[edge.i]->getSurprisal();
+                double w_j = appliedRules[edge.j]->getSurprisal();
                 
-                for (Combo* combo : fulfilledCombos) {
-                    double lift = combo->getSurprisalLift(&rules);
-                    if (lift > maxLift) {
-                        maxLift = lift;
-                        bestCombo = combo;
+                // The weaker rule in each negative edge should be deleted
+                if (w_i >= w_j) {
+                    deleteList.insert(edge.j);  // j is weaker
+                } else {
+                    deleteList.insert(edge.i);  // i is weaker
+                }
+            }
+            
+            // Get retained indices R' = R \ delete_list
+            for (int idx : deleteList) {
+                retainedIndices.erase(idx);
+            }
+            
+            if (shouldDebug && !deleteList.empty()) {
+                std::cout << "    [PRUNE] Deleted " << deleteList.size() << " dominated rules:" << std::endl;
+                for (int idx : deleteList) {
+                    Rule* rule = appliedRules[idx];
+                    std::cout << "      - " << rule->computeRuleString(data.getIndex())
+                              << " (surprisal=" << rule->getSurprisal() << ")" << std::endl;
+                }
+            }
+            
+        } else if (comboHandler.getNoisyorNegativeMethod() == "cluster") {
+            // ========== Cluster Method: Connected Components ==========
+            // Build undirected graph from negative edges and find connected components
+            
+            int numRules = appliedRules.size();
+            std::vector<std::vector<int>> adjList(numRules);
+            
+            for (const Edge& edge : negativeEdges) {
+                adjList[edge.i].push_back(edge.j);
+                adjList[edge.j].push_back(edge.i);
+            }
+            
+            // Find connected components using DFS
+            std::vector<bool> visited(numRules, false);
+            std::vector<std::vector<int>> components;
+            
+            for (int i = 0; i < numRules; i++) {
+                if (!visited[i]) {
+                    std::vector<int> component;
+                    std::vector<int> stack = {i};
+                    
+                    while (!stack.empty()) {
+                        int node = stack.back();
+                        stack.pop_back();
+                        
+                        if (visited[node]) continue;
+                        visited[node] = true;
+                        component.push_back(node);
+                        
+                        for (int neighbor : adjList[node]) {
+                            if (!visited[neighbor]) {
+                                stack.push_back(neighbor);
+                            }
+                        }
+                    }
+                    
+                    components.push_back(component);
+                }
+            }
+            
+            // Select representative from each component (max surprisal)
+            retainedIndices.clear();
+            for (const auto& component : components) {
+                int bestIdx = component[0];
+                double maxSurprisal = appliedRules[bestIdx]->getSurprisal();
+                
+                for (int idx : component) {
+                    double surprisal = appliedRules[idx]->getSurprisal();
+                    if (surprisal > maxSurprisal) {
+                        maxSurprisal = surprisal;
+                        bestIdx = idx;
                     }
                 }
                 
-                if (bestCombo && maxLift > 0) {
-                    addedSurprisal = maxLift;
+                retainedIndices.insert(bestIdx);
+            }
+            
+            if (shouldDebug) {
+                int clusteredRules = appliedRules.size() - retainedIndices.size();
+                if (clusteredRules > 0) {
+                    std::cout << "    [CLUSTER] " << components.size() << " components, "
+                              << "retained " << retainedIndices.size() << "/" << appliedRules.size() 
+                              << " rules" << std::endl;
                     
-                    if (shouldDebug) {
-                        std::cout << "    [max] Best Combo: lift=" << maxLift 
-                                  << ", conf=" << bestCombo->getConfidence()
-                                  << ", surprisal=" << bestCombo->getSurprisal() << std::endl;
-                        std::cout << "      Member rules (" << bestCombo->length << "):" << std::endl;
-                        for (size_t ruleHash : bestCombo->ruleHashes) {
-                            auto& hashToRule = rules.hashToRule;
-                            if (hashToRule.count(ruleHash)) {
-                                Rule* memberRule = hashToRule[ruleHash];
-                                std::cout << "        - " << memberRule->computeRuleString(data.getIndex())
-                                          << ", conf=" << memberRule->getConfidence()
-                                          << ", surprisal=" << memberRule->getSurprisal() << std::endl;
+                    // Show components with >1 rule
+                    for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
+                        const auto& comp = components[compIdx];
+                        if (comp.size() > 1) {
+                            std::cout << "      Component #" << (compIdx+1) << " (" << comp.size() << " rules):" << std::endl;
+                            for (int idx : comp) {
+                                Rule* rule = appliedRules[idx];
+                                bool isRep = (retainedIndices.count(idx) > 0);
+                                std::cout << "        " << (isRep ? "[REP] " : "      ")
+                                          << rule->computeRuleString(data.getIndex())
+                                          << " (surprisal=" << rule->getSurprisal() << ")" << std::endl;
                             }
                         }
                     }
                 }
-                
-            } else if (combo_noisyor_method == "greed") {
-                // Sort combos by surprisal lift (descending)
-                std::sort(fulfilledCombos.begin(), fulfilledCombos.end(),
-                    [&rules](Combo* a, Combo* b) {
-                        return a->getSurprisalLift(&rules) > b->getSurprisalLift(&rules);
+            }
+        }
+        
+        // ========== Recalculate base surprisal for retained rules ==========
+        double baseSurprisal = 0.0;
+        for (int idx : retainedIndices) {
+            baseSurprisal += appliedRules[idx]->getSurprisal();
+        }
+        
+        // ========== Apply Positive Method: Synergy from positive edges ==========
+        double addedSynergy = 0.0;
+        
+        if (comboHandler.getNoisyorPositiveMethod() == "none") {
+            // No positive synergy
+            
+        } else if (comboHandler.getNoisyorPositiveMethod() == "mst") {
+            // ========== MST Method: Maximum Spanning Forest on positive edges ==========
+            // Only consider edges where BOTH endpoints are in R'
+            
+            std::vector<Edge> eligiblePositiveEdges;
+            for (const Edge& edge : positiveEdges) {
+                if (retainedIndices.count(edge.i) && retainedIndices.count(edge.j)) {
+                    eligiblePositiveEdges.push_back(edge);
+                }
+            }
+            
+            if (!eligiblePositiveEdges.empty()) {
+                // Sort edges by lift (descending) for Kruskal's MST
+                std::sort(eligiblePositiveEdges.begin(), eligiblePositiveEdges.end(),
+                    [](const Edge& a, const Edge& b) {
+                        return a.lift > b.lift;
                     });
                 
-                // Greedy selection: mark used rules
-                std::unordered_set<size_t> usedRuleHashes;
-                std::vector<Combo*> selectedCombos;
+                // Union-Find for Kruskal's algorithm
+                std::unordered_map<int, int> parent;
+                std::unordered_map<int, int> rank_uf;
                 
-                for (Combo* combo : fulfilledCombos) {
-                    double lift = combo->getSurprisalLift(&rules);
-                    if (lift <= 0) break; // Skip combos with non-positive lift
+                // Initialize each retained node as its own parent
+                for (int idx : retainedIndices) {
+                    parent[idx] = idx;
+                    rank_uf[idx] = 0;
+                }
+                
+                // Find with path compression
+                std::function<int(int)> find = [&](int x) -> int {
+                    if (parent[x] != x) {
+                        parent[x] = find(parent[x]);
+                    }
+                    return parent[x];
+                };
+                
+                // Union by rank
+                auto unionSets = [&](int x, int y) -> bool {
+                    int px = find(x);
+                    int py = find(y);
+                    if (px == py) return false; // Already in same set (would create cycle)
                     
-                    // Check if any member rule is already used
-                    bool hasConflict = false;
-                    for (size_t ruleHash : combo->ruleHashes) {
-                        if (usedRuleHashes.count(ruleHash)) {
-                            hasConflict = true;
-                            break;
+                    if (rank_uf[px] < rank_uf[py]) {
+                        parent[px] = py;
+                    } else if (rank_uf[px] > rank_uf[py]) {
+                        parent[py] = px;
+                    } else {
+                        parent[py] = px;
+                        rank_uf[px]++;
+                    }
+                    return true;
+                };
+                
+                // Build MST (actually maximum spanning forest)
+                std::vector<Edge> mstEdges;
+                for (const Edge& edge : eligiblePositiveEdges) {
+                    if (unionSets(edge.i, edge.j)) {
+                        mstEdges.push_back(edge);
+                        addedSynergy += comboHandler.getLiftRatio() * edge.lift;
+                    }
+                }
+                
+                if (shouldDebug && !mstEdges.empty()) {
+                    std::cout << "    [MST] Selected " << mstEdges.size() << " tree edges:" << std::endl;
+                    for (size_t i = 0; i < mstEdges.size(); i++) {
+                        const Edge& edge = mstEdges[i];
+                        std::cout << "      Edge #" << (i+1) << ": lift=" << edge.lift
+                                  << " (scaled: " << (comboHandler.getLiftRatio() * edge.lift) << ")" << std::endl;
+                    }
+                    std::cout << "      Total synergy (alpha * sum(lifts)): " << addedSynergy << std::endl;
+                }
+            }
+            
+        } else if (comboHandler.getNoisyorPositiveMethod() == "matching1" || comboHandler.getNoisyorPositiveMethod() == "matching2") {
+            // ========== b-Matching Method: Maximum Weight b-Matching on positive edges ==========
+            // Greedy approximation: sort edges by weight, select if both endpoints' degree < b
+            // matching1: b=1 (maximum matching), matching2: b=2
+            
+            int b = (comboHandler.getNoisyorPositiveMethod() == "matching1") ? 1 : 2;
+            
+            // Only consider edges where BOTH endpoints are in R'
+            std::vector<Edge> eligiblePositiveEdges;
+            for (const Edge& edge : positiveEdges) {
+                if (retainedIndices.count(edge.i) && retainedIndices.count(edge.j)) {
+                    eligiblePositiveEdges.push_back(edge);
+                }
+            }
+            
+            if (!eligiblePositiveEdges.empty()) {
+                // Sort edges by lift (descending) for greedy selection
+                std::sort(eligiblePositiveEdges.begin(), eligiblePositiveEdges.end(),
+                    [](const Edge& a, const Edge& b) {
+                        return a.lift > b.lift;
+                    });
+                
+                // Track degree of each node
+                std::unordered_map<int, int> nodeDegree;
+                for (int idx : retainedIndices) {
+                    nodeDegree[idx] = 0;
+                }
+                
+                // Greedily select edges
+                std::vector<Edge> selectedEdges;
+                for (const Edge& edge : eligiblePositiveEdges) {
+                    // Check if both endpoints have degree < b
+                    if (nodeDegree[edge.i] < b && nodeDegree[edge.j] < b) {
+                        selectedEdges.push_back(edge);
+                        nodeDegree[edge.i]++;
+                        nodeDegree[edge.j]++;
+                        addedSynergy += comboHandler.getLiftRatio() * edge.lift;
+                    }
+                }
+                
+                if (shouldDebug && !selectedEdges.empty()) {
+                    std::cout << "    [MATCHING" << b << "] Selected " << selectedEdges.size() << " edges:" << std::endl;
+                    for (size_t i = 0; i < selectedEdges.size(); i++) {
+                        const Edge& edge = selectedEdges[i];
+                        std::cout << "      Edge #" << (i+1) << ": lift=" << edge.lift
+                                  << " (scaled: " << (comboHandler.getLiftRatio() * edge.lift) << ")"
+                                  << " [rule " << edge.i << " <-> rule " << edge.j << "]" << std::endl;
+                    }
+                    std::cout << "      Total synergy (alpha * sum(lifts)): " << addedSynergy << std::endl;
+                    
+                    // Show node degree statistics
+                    std::cout << "      Node degree distribution:" << std::endl;
+                    std::unordered_map<int, int> degreeCount;
+                    for (const auto& pair : nodeDegree) {
+                        if (pair.second > 0) {
+                            degreeCount[pair.second]++;
                         }
                     }
-                    
-                    if (!hasConflict) {
-                        // Select this combo
-                        selectedCombos.push_back(combo);
-                        addedSurprisal += lift;
-                        
-                        // Mark all member rules as used
-                        for (size_t ruleHash : combo->ruleHashes) {
-                            usedRuleHashes.insert(ruleHash);
-                        }
-                    }
-                }
-                
-                if (shouldDebug && !selectedCombos.empty()) {
-                    std::cout << "    [greed] Selected " << selectedCombos.size() << " combos:" << std::endl;
-                    for (size_t i = 0; i < selectedCombos.size(); i++) {
-                        Combo* combo = selectedCombos[i];
-                        std::cout << "      Combo #" << (i+1) << ": lift=" << combo->getSurprisalLift(&rules)
-                                  << ", conf=" << combo->getConfidence()
-                                  << ", length=" << combo->length << std::endl;
-                    }
-                    std::cout << "      Total added surprisal: " << addedSurprisal << std::endl;
-                }
-                
-            } else if (combo_noisyor_method == "all") {
-                // Aggressive method: add all combo lifts (even if negative)
-                std::vector<Combo*> positiveLiftCombos;
-                
-                for (Combo* combo : fulfilledCombos) {
-                    double lift = combo->getSurprisalLift(&rules);
-                    addedSurprisal += lift;
-                    if (lift > 0) {
-                        positiveLiftCombos.push_back(combo);
-                    }
-                }
-                
-                if (shouldDebug && !fulfilledCombos.empty()) {
-                    std::cout << "    [All] Adding all " << fulfilledCombos.size() << " combo lifts:" << std::endl;
-                    std::cout << "      Combos with positive lift: " << positiveLiftCombos.size() << std::endl;
-                    std::cout << "      Total added surprisal: " << addedSurprisal << std::endl;
-                    if (positiveLiftCombos.size() <= 10) {
-                        for (size_t i = 0; i < positiveLiftCombos.size(); i++) {
-                            Combo* combo = positiveLiftCombos[i];
-                            std::cout << "        Combo #" << (i+1) << ": lift=" << combo->getSurprisalLift(&rules)
-                                      << ", conf=" << combo->getConfidence()
-                                      << ", length=" << combo->length << std::endl;
+                    for (int deg = 0; deg <= b; deg++) {
+                        if (degreeCount.count(deg)) {
+                            std::cout << "        Degree " << deg << ": " << degreeCount[deg] << " nodes" << std::endl;
                         }
                     }
                 }
             }
-            
-            // Update aggregated surprisal
-            aggregatedSurprisal[candidate] = originalSurprisal + addedSurprisal;
-            
-            if (shouldDebug && addedSurprisal > 0) {
-                std::cout << "    Surprisal after combo: " << aggregatedSurprisal[candidate] 
-                          << " (added: " << addedSurprisal << ")" << std::endl;
-            }
+        }
+        
+        // ========== Update aggregated surprisal ==========
+        double newSurprisal = baseSurprisal + addedSynergy;
+        aggregatedSurprisal[candidate] = newSurprisal;
+        
+        if (shouldDebug && (retainedIndices.size() < appliedRules.size() || addedSynergy > 0)) {
+            std::cout << "    Final: base=" << baseSurprisal 
+                      << ", synergy=" << addedSynergy 
+                      << ", total=" << newSurprisal << std::endl;
         }
     }
     
@@ -374,7 +473,7 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
                 return a.second > b.second;
             });
         
-        for (int i = 0; i < afterRanking.size(); i++) {
+        for (size_t i = 0; i < afterRanking.size(); i++) {
             int candId = afterRanking[i].first;
             if (gtRanksBefore.count(candId)) {
                 gtRanksAfter[candId] = i + 1;
@@ -532,9 +631,10 @@ void ApplicationHandler::calculateTripleScores(std::vector<Triple> triples, Trip
     typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&, int, int, bool, const int*, int);
     SortAndProcessPtr sortAndProcess = nullptr;
 
-    if(rank_aggrFunc=="noisyor") {
+    std::string aggrFunc = comboHandler.getAggregationFunction();
+    if(aggrFunc=="noisyor") {
         sortAndProcess = &ApplicationHandler::sortAndProcessNoisy;
-    } else if (rank_aggrFunc=="maxplus") {
+    } else if (aggrFunc=="maxplus") {
         sortAndProcess = &ApplicationHandler::sortAndProcessMax;
     }else{
         throw std::runtime_error("Dont understand the aggregation function.");
@@ -544,7 +644,7 @@ void ApplicationHandler::calculateTripleScores(std::vector<Triple> triples, Trip
     {
         QueryResults tripleResults(1, 1);
         // we dont need to set num_top_rules as the stopping is handled outside; there is only one "candidate"
-        tripleResults.setAggrFunc(rank_aggrFunc);
+        tripleResults.setAggrFunc(aggrFunc);
         RuleGroundings ruleGroundings;   
         #pragma omp for schedule(dynamic)
         for (int i=0; i<triples.size(); i++){
@@ -615,9 +715,10 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
     typedef void (ApplicationHandler::*SortAndProcessPtr)(std::vector<std::pair<int,double>>&, QueryResults&, TripleStorage&, RuleStorage&, int, int, bool, const int*, int);
     SortAndProcessPtr sortAndProcess = nullptr;
 
-    if(rank_aggrFunc=="noisyor") {
+    std::string aggrFunc = comboHandler.getAggregationFunction();
+    if(aggrFunc=="noisyor") {
         sortAndProcess = &ApplicationHandler::sortAndProcessNoisy;
-    } else if (rank_aggrFunc=="maxplus") {
+    } else if (aggrFunc=="maxplus") {
         sortAndProcess = &ApplicationHandler::sortAndProcessMax;
     }else{
         throw std::runtime_error("Dont understand the aggregation function.");
@@ -656,7 +757,7 @@ void ApplicationHandler::calculateQueryResults(TripleStorage& target, TripleStor
     {
         QueryResults qResults(rank_topk, rank_discAtLeast);
         qResults.setPerformAggregation(performAggregation);
-        qResults.setAggrFunc(rank_aggrFunc);
+        qResults.setAggrFunc(aggrFunc);
         qResults.setNumTopRules(score_numTopRules);
         ManySet filter;
         #pragma omp for schedule(dynamic)
@@ -756,16 +857,16 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
     // Under independent rule assumption, higher aggregated surprisal means lower failure probability
 
     // Debug tracking - only for first few queries on thread 0
-    static int queryCount = 0;
-    static std::mutex debugMutex;
+    // No mutex needed: only thread 0 enters this block, and it processes one query at a time
+    static std::atomic<int> queryCount(0);
     bool shouldDebug = false;
     int threadNum = omp_get_thread_num();
     
+    // Only thread 0 checks debug; atomic operation ensures thread safety
     if (threadNum == 0 && rules.hasCombos()) {
-        std::lock_guard<std::mutex> lock(debugMutex);
-        if (queryCount < queryTopK) {
+        int currentCount = queryCount.fetch_add(1, std::memory_order_relaxed);
+        if (currentCount < comboHandler.getQueryTopK()) {
             shouldDebug = true;
-            queryCount++;
             
             // For link prediction, output full query info
             if (queryRel >= 0) {
@@ -781,8 +882,10 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
                 auto& candRules = qResults.getCandRules();
                 if (!candRules.empty()) {
                     int tail = candRules.begin()->first;
-                    std::cout << "  Aggregation Method: " << rank_aggrFunc << std::endl;
-                    std::cout << "  Combo Method: " << combo_noisyor_method << std::endl;
+                    std::cout << "  Aggregation Method: " << comboHandler.getAggregationFunction() << std::endl;
+                    std::cout << "  Combo Positive Method: " << comboHandler.getNoisyorPositiveMethod() << std::endl;
+                    std::cout << "  Combo Negative Method: " << comboHandler.getNoisyorNegativeMethod() << std::endl;
+                    std::cout << "  Combo Lift Ratio: " << comboHandler.getLiftRatio() << std::endl;
                     
                     std::vector<Rule*>& appliedRules = candRules.begin()->second;
                     std::cout << "\n  Applied Rules: " << appliedRules.size() << std::endl;
@@ -799,7 +902,7 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
                         std::cout << "    ... (" << (appliedRules.size() - maxRulesToShow) << " more rules)" << std::endl;
                     }
                     
-                    std::cout << "\n  Aggregated Surprisal (before combo/clustering): " 
+                    std::cout << "\n  Aggregated Surprisal (before combo): " 
                               << qResults.getCandScores().at(tail) << std::endl;
                 }
             }
@@ -810,18 +913,15 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
     std::unordered_map<int, double> aggregatedSurprisal = qResults.getCandScores();
     auto& candRules = qResults.getCandRules();
     
-    // Apply clustering adjustments (rule similarity-based aggregation)
-    applyClusteringAdjustments(aggregatedSurprisal, candRules, shouldDebug, data);
-    
-    // Apply combo adjustments (max/greed/all modes)
+    // Apply combo adjustments (negative: prune/cluster, positive: mst)
     applyComboAdjustmentsNoisyor(aggregatedSurprisal, candRules, rules, shouldDebug, data, 
                                   groundTruthTargets, numGroundTruth);
 
     candScoresToSort.assign(aggregatedSurprisal.begin(), aggregatedSurprisal.end()); 
 
-    // Debug output for triple classification: show surprisal after combo/clustering
+    // Debug output for triple classification: show surprisal after combo
     if (shouldDebug && queryRel == -1) {
-        std::cout << "\n  Aggregated Surprisal (after combo/clustering): ";
+        std::cout << "\n  Aggregated Surprisal (after combo): ";
         if (!candScoresToSort.empty()) {
             std::cout << candScoresToSort[0].second << std::endl;
         } else {
@@ -887,7 +987,8 @@ void ApplicationHandler::aggregateQueryResults(std::string direction, TripleStor
             std::unordered_map<int, NodeToPredRules>& srcToCand = queries.second;
             for (auto& query: srcToCand){
                 int source = query.first; 
-                if (rank_aggrFunc=="maxplus"){
+                std::string aggrFunc = comboHandler.getAggregationFunction();
+                if (aggrFunc=="maxplus"){
                     scoreMaxPlus(query.second, writeResults[relation][source], train, rules);
                 }else{
                     throw std::runtime_error("Aggregation function is not recognized in calculate ranking.");
@@ -1047,18 +1148,18 @@ void ApplicationHandler::scoreMaxPlus(
     std::unordered_map<int, std::vector<double>> candToScoreListBeforeCombo; // For comparison
     
     // Debug: Track first few queries for detailed analysis - ONLY thread 0
-    static int queryCount = 0;
-    static std::mutex debugMutex;
+    // No mutex needed: only thread 0 enters this block, and it processes one query at a time
+    static std::atomic<int> queryCount(0);
     bool shouldDebug = false;
     int threadNum = omp_get_thread_num();
     Rule* bestRule = nullptr;
     Combo* bestCombo = nullptr;
     
+    // Only thread 0 checks debug; atomic operation ensures thread safety
     if (threadNum == 0 && queryRel >= 0) {
-        std::lock_guard<std::mutex> lock(debugMutex);
-        if (queryCount < queryTopK) {
+        int currentCount = queryCount.fetch_add(1, std::memory_order_relaxed);
+        if (currentCount < comboHandler.getQueryTopK()) {
             shouldDebug = true;
-            queryCount++;
             
             // Use helper function for debug output
             std::unordered_map<int, std::vector<Rule*>> candRulesCopy(candToRules.begin(), candToRules.end());
@@ -1308,7 +1409,8 @@ void ApplicationHandler::setAggregationFunc(std::string func){
     if (!(func=="maxplus") && !(func=="noisyor")){
         throw std::runtime_error("The aggregation function value is not known, select from 'noisyor' or 'maxplus' found value: " + func);
     }
-    rank_aggrFunc = func;
+    // Set to comboHandler instead of local variable
+    comboHandler.setAggregationFunction(func);
 }
 
 void ApplicationHandler::setSaveCandidateRules(bool ind){

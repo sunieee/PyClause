@@ -8,6 +8,7 @@
 #include "../core/TripleStorage.h"
 #include "../core/RuleStorage.h"
 #include "../core/Types.h"
+#include "../api/ComboHandler.h"
 
 
 
@@ -57,24 +58,9 @@ public:
     void setScoreCollectGroundings(bool ind);
     bool getScoreCollectGroundings();
     void setAdaptTopK(bool ind);
-    void setQueryTopK(int num) {
-        queryTopK = num;
-    }
-    void setComboNoisyorMethod(std::string method) {
-        combo_noisyor_method = method;
-    }
-    void setMinRuleJaccard(double threshold) {
-        min_rule_jaccard = threshold;
-    }
     
-    // Transfer bodyHashPair2Jaccard from Loader
-    template<typename MapType>
-    void setBodyHashPair2Jaccard(const MapType& jaccardMap) {
-        bodyHashPair2Jaccard.clear();
-        for (const auto& pair : jaccardMap) {
-            bodyHashPair2Jaccard[pair.first] = pair.second;
-        }
-    }
+    // Combo handler accessor
+    ComboHandler& getComboHandler() { return comboHandler; }
 
 
     //triple scoring
@@ -89,7 +75,6 @@ public:
 private:
     // tail candidates for head queries and all the respective rules that predicted them
     // [relation][tail] --> cands
-    int queryTopK = 10;
     std::unordered_map<int,std::unordered_map<int, NodeToPredRules>> headQcandsRules;
     // tail candidates and the aggregated confidences
     std::unordered_map<int,std::unordered_map<int, CandidateConfs>> headQcandsConfs;
@@ -111,13 +96,6 @@ private:
     void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
 
     // Helper functions for modularized strategies
-    void applyClusteringAdjustments(
-        std::unordered_map<int, double>& aggregatedSurprisal,
-        std::unordered_map<int, std::vector<Rule*>>& candRules,
-        bool shouldDebug,
-        TripleStorage& data
-    );
-    
     void applyComboAdjustmentsNoisyor(
         std::unordered_map<int, double>& aggregatedSurprisal,
         std::unordered_map<int, std::vector<Rule*>>& candRules,
@@ -169,8 +147,9 @@ private:
     // filter with the target set (mostly the "test" set)
     // note, fitering with additional set e.g. valid is performend by giving filter set as param in ranking functions
     bool rank_filterWtarget=true;
-    // aggregation function in {"maxplus"}
-    std::string rank_aggrFunc="maxplus";
+    // aggregation function is now managed by ComboHandler
+    // kept for backward compatibility, but no longer used internally
+    // std::string rank_aggrFunc="maxplus"; 
 
     // track for each candidate the predicting rules (saved in e.g. headQcandsRules )
     bool saveCandidateRules=false;
@@ -207,26 +186,8 @@ private:
     // when filtering with target, what we always do for KBC
     bool adapt_topk = false;
 
-    // Method for applying combos in noisyor aggregation
-    // "none": no combo support
-    // "max": add only the combo with maximum surprisal lift
-    // "greed": greedy selection of combos by surprisal lift, avoiding rule conflicts
-    std::string combo_noisyor_method = "none";
-
-    // Hash function for pair<size_t, size_t>
-    struct PairHash {
-        size_t operator()(const std::pair<size_t, size_t>& p) const {
-            return std::hash<size_t>{}(p.first) ^ (std::hash<size_t>{}(p.second) << 1);
-        }
-    };
-
-    // Jaccard similarity between rule body hash pairs
-    // Key: pair<bodyHash1, bodyHash2> (sorted), Value: Jaccard similarity
-    std::unordered_map<std::pair<size_t, size_t>, double, PairHash> bodyHashPair2Jaccard;
-    
-    // Minimum Jaccard similarity for rule connectivity
-    double min_rule_jaccard = 0.5;
-
+    // Combo handler for managing combo rule aggregation settings
+    ComboHandler comboHandler;
 
     //***triple scoring options***
 

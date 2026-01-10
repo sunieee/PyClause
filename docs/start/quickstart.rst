@@ -35,7 +35,7 @@ Run the following code from anywhere, it shows an example of answering the queri
    ]
    # define options, handlers and load data
    opts = Options()
-   opts.set("qa_handler.aggregation_function", "noisyor")
+   opts.set("combo_handler.aggregation_function", "noisyor")
 
    loader = Loader(options=opts.get("loader"))
    loader.load_data(data)

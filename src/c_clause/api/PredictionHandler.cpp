@@ -24,14 +24,13 @@ void PredictionHandler::setOptions(std::map<std::string, std::string> options, A
     };
 
     std::vector<OptionHandler> handlers = {
-        {"aggregation_function", [&scorer](std::string val) {scorer.setAggregationFunc(val);}},
         {"collect_explanations", [&scorer](std::string val) {scorer.setScoreCollectGroundings(util::stringToBool(val));}},
         {"num_top_rules", [&scorer](std::string val) {scorer.setScoreNumTopRules(std::stoi(val));}},
         {"num_threads", [&scorer](std::string val) {scorer.setNumThr(std::stoi(val));}},
-        {"queryTopK", [&scorer](std::string val) { scorer.setQueryTopK(std::stoi(val)); }},
-        {"combo_noisyor_method", [&scorer](std::string val) { scorer.setComboNoisyorMethod(val); }},
-        {"min_rule_jaccard", [&scorer](std::string val) { scorer.setMinRuleJaccard(std::stod(val)); }},
     };
+    
+    // Load combo_handler options - ComboHandler handles extraction internally
+    scorer.getComboHandler().loadOptionsFromMap(options, verbose);
 
     for (auto& handler : handlers) {
         auto opt = options.find(handler.name);
@@ -50,6 +49,10 @@ void PredictionHandler::scoreTriples(std::vector<std::array<int, 3>> triples,  s
     }
     scorer.clearAll();
     index = dHandler->getIndex();
+    
+    // Copy ComboHandler configuration from Loader to ApplicationHandler
+    scorer.getComboHandler() = dHandler->getComboHandler();
+    
     scorer.calculateTripleScores(triples, dHandler->getData(), dHandler->getRules());
 }
 
@@ -91,6 +94,10 @@ void PredictionHandler::scoreTriples(std::string path,  std::shared_ptr<Loader> 
     triples = dHandler->loadTriplesToVec(path);
     scorer.clearAll();
     index = dHandler->getIndex();
+    
+    // Copy ComboHandler configuration from Loader to ApplicationHandler
+    scorer.getComboHandler() = dHandler->getComboHandler();
+    
     scorer.calculateTripleScores(*triples, dHandler->getData(), dHandler->getRules());
 }
 

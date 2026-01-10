@@ -20,7 +20,7 @@ loader.load_data(data=data)
 loader.load_rules(rules)
 
 # prediction score for a triple is the confidence of the highest predicting rule
-opts.set("prediction_handler.aggregation_function", "maxplus")
+opts.set("combo_handler.aggregation_function", "maxplus")
 opts.set("prediction_handler.num_top_rules", 1)
 
 

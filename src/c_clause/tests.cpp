@@ -638,7 +638,7 @@ void testTripleScoring(){
     ranker.setDiscAtLeast(-1);
     ranker.setScoreNumTopRules(-1);
     ranker.calculateTripleScores(triples, train, rules);
-    ranker.setAggregationFunc("noisyor");
+    ranker.getComboHandler().setAggregationFunction("noisyor");
     ranker.setTopK(100);
     
 

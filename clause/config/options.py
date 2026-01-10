@@ -16,6 +16,21 @@ class Options():
             self.options  = yaml.safe_load(file)
             self.default_options = copy.deepcopy(self.options)
 
+        # Backward-compatible alias: expose combo_handler also under loader.combo_handler
+        # This allows using both "combo_handler.*" and "loader.combo_handler.*" keys.
+        try:
+            if "loader" in self.options and "combo_handler" in self.options:
+                loader_cfg = self.options["loader"]
+                if "combo_handler" not in loader_cfg:
+                    loader_cfg["combo_handler"] = self.options["combo_handler"]
+
+                loader_default_cfg = self.default_options.get("loader")
+                if loader_default_cfg is not None and "combo_handler" not in loader_default_cfg:
+                    loader_default_cfg["combo_handler"] = self.default_options["combo_handler"]
+        except Exception:
+            # In case the default structure changes in the future, avoid crashing here
+            pass
+
         if path:
             options_extra = {}
             with open(path, 'r') as file:

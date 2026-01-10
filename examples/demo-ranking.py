@@ -15,7 +15,7 @@ out = f"{get_base_dir()}/local/ranking-file.txt"
 
 options = Options()
 options.set("ranking_handler.disc_at_least", 10)
-options.set("ranking_handler.aggregation_function", "maxplus")
+options.set("combo_handler.aggregation_function", "maxplus")
 options.set("ranking_handler.num_top_rules", -1)
 options.set("ranking_handler.num_threads", -1)
 

@@ -18,10 +18,10 @@ public:
     RuleFactory(std::shared_ptr<Index> index);
     // if numPreds and numTrue given it will also check if the rule should based on the member constraints
     // e.g. BminNumPreds
-    std::unique_ptr<Rule> parseAnytimeRule(std::string rule, int numPreds=-1, int numTrue=-1);
+    std::unique_ptr<Rule> parseAnytimeRule(std::string rule, int numPreds=-1, int numTrue=-1, double lift=0.0);
     
     // Parse combo rule (multi-rule with semicolon separator)
-    void parseCombo(std::string rule, int numPreds, int numTrue);
+    void parseCombo(std::string rule, int numPreds, int numTrue, double lift);
 
     std::unique_ptr<Rule> parseUXXrule(std::vector<std::string> headBody, int numPreds=-1, int numTrue=-1);
     std::unique_ptr<Rule> parseUcRule(std::vector<std::string> headBody, int numPreds=-1, int numTrue=-1);
@@ -42,8 +42,6 @@ public:
     void setCreateRuleXXc(bool ind);
     void setCreateCombo(bool ind);
     void setComboDebug(bool ind);
-    void setComboMaxDepth(int val);
-    void setComboMaxBranch(int val);
     void setNumUnseen(int val, std::string type);
 
     void setMinCorrect(int val, std::string type);
@@ -59,12 +57,6 @@ public:
     void setCmaxLength(int val);
     void setDmaxLength(int val);
     
-    // Getter for combo num_unseen
-    int getCombonumUnseen() const { return CombonumUnseen; }
-    
-    // Getter for combo max depth
-    int getMmaxDepth() const { return MmaxDepth; }
-    
     // Set RuleStorage for combo parsing
     void setRuleStorage(class RuleStorage* storage) { ruleStorage = storage; }
 
@@ -74,12 +66,6 @@ private:
 
     // ***Rule options***
     bool createCombo = true;
-    int MminCorrect = 1;
-    int MminPreds = 1;
-    double MminConf = 0.0;
-    int CombonumUnseen = 0;
-    int MmaxDepth = -1;  // -1 means no limit
-    int MmaxBranch = -1; // -1 means no limit
 
     // ***Rule options***
     bool createRuleZ = true;

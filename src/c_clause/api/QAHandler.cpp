@@ -81,6 +81,10 @@ void QAHandler::calculate_answers(std::vector<std::pair<int, int>>& queries, std
     answers.clear();
     answers.resize(queries.size());
     index = dHandler->getIndex();
+    
+    // Copy ComboHandler configuration from Loader to ApplicationHandler
+    ranker.getComboHandler() = dHandler->getComboHandler();
+    
     ranker.clearAll();
     TripleStorage target(index);
     bool isTailQuery;
