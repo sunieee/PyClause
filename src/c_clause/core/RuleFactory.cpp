@@ -263,9 +263,10 @@ std::unique_ptr<Rule>RuleFactory::parseUXXrule(std::vector<std::string> headBody
 }
 
 std::unique_ptr<Rule> RuleFactory::parseAnytimeRule(std::string rule, int numPreds, int numTrue, double lift) {
-    // Check for combo (multi-rule) first - contains semicolon separator
-    if (rule.find(';') != std::string::npos) {
-        if (comboDebug) std::cout << "[RuleFactory] Detected semicolon - parsing as combo" << std::endl;
+    // Check for combo (multi-rule) first - contains combo separator
+    const std::string comboSep = "&&";
+    if (rule.find(comboSep) != std::string::npos) {
+        if (comboDebug) std::cout << "[RuleFactory] Detected combo separator '" << comboSep << "' - parsing as combo" << std::endl;
         parseCombo(rule, numPreds, numTrue, lift);
         return nullptr;  // Combos don't create Rule objects
     }
@@ -868,12 +869,12 @@ void RuleFactory::parseCombo(std::string rule, int numPreds, int numTrue, double
             std::cout << "[parseCombo thread:" << threadNum << "] Bodies: " << bodiesStr << std::endl;
         }
         
-        // Split bodies by semicolon
-        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Splitting bodies by semicolon..." << std::endl;
+        // Split bodies by combo separator ("&&")
+        if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Splitting bodies by combo separator '&&'..." << std::endl;
         
         std::vector<std::string> bodyParts;
         try {
-            bodyParts = util::splitString(bodiesStr, ";");
+            bodyParts = util::splitString(bodiesStr, "&&");
             if (comboDebug) std::cout << "[parseCombo thread:" << threadNum << "] Split successful, got " << bodyParts.size() << " parts" << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "[parseCombo thread:" << threadNum << "] ERROR during split: " << e.what() << std::endl;
