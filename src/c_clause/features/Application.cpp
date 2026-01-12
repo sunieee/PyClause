@@ -20,6 +20,169 @@
 
 // ================ Helper Functions for Modularized Strategies ================
 
+// Helper function to calculate surprisal for a group of rules
+double ApplicationHandler::calculateGroupSurprisal(
+    const std::vector<int>& groupIndices,
+    const std::vector<Rule*>& allRules,
+    const std::vector<Combo*>& allFulfilledCombos,
+    const std::unordered_map<size_t, int>& hashToIndex,
+    bool shouldDebug,
+    TripleStorage& data,
+    const std::string& groupType
+) {
+    if (groupIndices.empty()) return 0.0;
+    
+    // Create a set for quick lookup
+    std::unordered_set<int> groupSet(groupIndices.begin(), groupIndices.end());
+    
+    // Extract positive and negative edges within this group
+    struct Edge {
+        int i, j;
+        double lift;
+    };
+    std::vector<Edge> positiveEdges, negativeEdges;
+    
+    for (Combo* combo : allFulfilledCombos) {
+        auto it1 = hashToIndex.find(combo->ruleHash1);
+        auto it2 = hashToIndex.find(combo->ruleHash2);
+        if (it1 == hashToIndex.end() || it2 == hashToIndex.end()) continue;
+        
+        int idx1 = it1->second;
+        int idx2 = it2->second;
+        
+        // Only include edges where both endpoints are in this group
+        if (groupSet.count(idx1) && groupSet.count(idx2)) {
+            Edge edge{idx1, idx2, combo->getSurprisalLift()};
+            if (edge.lift > 0) {
+                positiveEdges.push_back(edge);
+            } else if (edge.lift < 0) {
+                negativeEdges.push_back(edge);
+            }
+        }
+    }
+    
+    // Step 1: Calculate adjusted surprisal with negative edge suppression
+    double negativeWeight = comboHandler.getNegativeWeight();
+    std::unordered_map<int, int> ruleInDegree;
+    std::unordered_map<int, double> adjustedSurprisal;
+    double maxAdjustedSurprisal = 0.0;
+    
+    for (int idx : groupIndices) {
+        ruleInDegree[idx] = 0;
+    }
+    
+    for (const Edge& edge : negativeEdges) {
+        double w_i = allRules[edge.i]->getSurprisal();
+        double w_j = allRules[edge.j]->getSurprisal();
+        if (w_i >= w_j) {
+            ruleInDegree[edge.j]++;
+        } else {
+            ruleInDegree[edge.i]++;
+        }
+    }
+    
+    for (int idx : groupIndices) {
+        double originalSurprisal = allRules[idx]->getSurprisal();
+        double suppression = 1.0 + negativeWeight * ruleInDegree[idx];
+        adjustedSurprisal[idx] = originalSurprisal / suppression;
+        maxAdjustedSurprisal = std::max(maxAdjustedSurprisal, adjustedSurprisal[idx]);
+    }
+    
+    // Step 2: Calculate sharpness factors (alpha)
+    double aggregateSharpness = comboHandler.getAggregateSharpness();
+    std::unordered_map<int, double> alphaFactors;
+    
+    if (maxAdjustedSurprisal > 0) {
+        for (int idx : groupIndices) {
+            double ratio = adjustedSurprisal[idx] / maxAdjustedSurprisal;
+            alphaFactors[idx] = std::pow(ratio, aggregateSharpness);
+        }
+    } else {
+        for (int idx : groupIndices) {
+            alphaFactors[idx] = 1.0;
+        }
+    }
+    
+    // Step 3: Apply positive method and calculate synergy
+    double addedSynergy = 0.0;
+    std::string positiveMethod = comboHandler.getPositiveMethod();
+    
+    if (positiveMethod != "none" && !positiveEdges.empty()) {
+        std::vector<Edge> selectedEdges;
+        
+        if (positiveMethod == "mst") {
+            // Maximum Spanning Tree
+            std::sort(positiveEdges.begin(), positiveEdges.end(),
+                [](const Edge& a, const Edge& b) { return a.lift > b.lift; });
+            
+            std::unordered_map<int, int> parent;
+            for (int idx : groupIndices) parent[idx] = idx;
+            
+            std::function<int(int)> find = [&](int x) -> int {
+                if (parent[x] != x) parent[x] = find(parent[x]);
+                return parent[x];
+            };
+            
+            for (const Edge& edge : positiveEdges) {
+                int px = find(edge.i), py = find(edge.j);
+                if (px != py) {
+                    parent[px] = py;
+                    selectedEdges.push_back(edge);
+                    double minAlpha = std::min(alphaFactors[edge.i], alphaFactors[edge.j]);
+                    addedSynergy += edge.lift * minAlpha;
+                }
+            }
+        } else if (positiveMethod == "matching1" || positiveMethod == "matching2") {
+            // b-Matching
+            int b = (positiveMethod == "matching1") ? 1 : 2;
+            std::sort(positiveEdges.begin(), positiveEdges.end(),
+                [](const Edge& a, const Edge& b) { return a.lift > b.lift; });
+            
+            std::unordered_map<int, int> nodeDegree;
+            for (int idx : groupIndices) nodeDegree[idx] = 0;
+            
+            for (const Edge& edge : positiveEdges) {
+                if (nodeDegree[edge.i] < b && nodeDegree[edge.j] < b) {
+                    selectedEdges.push_back(edge);
+                    nodeDegree[edge.i]++;
+                    nodeDegree[edge.j]++;
+                    double minAlpha = std::min(alphaFactors[edge.i], alphaFactors[edge.j]);
+                    addedSynergy += edge.lift * minAlpha;
+                }
+            }
+        } else if (positiveMethod == "all") {
+            // Use all positive edges
+            for (const Edge& edge : positiveEdges) {
+                selectedEdges.push_back(edge);
+                double minAlpha = std::min(alphaFactors[edge.i], alphaFactors[edge.j]);
+                addedSynergy += edge.lift * minAlpha;
+            }
+        }
+        
+        if (shouldDebug && !selectedEdges.empty()) {
+            std::cout << "      [" << groupType << " group] Selected " << selectedEdges.size() 
+                      << " positive edges, synergy=" << addedSynergy << std::endl;
+        }
+    }
+    
+    // Step 4: Calculate final group surprisal
+    double weightedBaseSurprisal = 0.0;
+    for (int idx : groupIndices) {
+        weightedBaseSurprisal += adjustedSurprisal[idx] * alphaFactors[idx];
+    }
+    
+    double groupSurprisal = weightedBaseSurprisal + comboHandler.getPositiveWeight() * addedSynergy;
+    
+    if (shouldDebug && groupIndices.size() > 0) {
+        std::cout << "      [" << groupType << " group] " << groupIndices.size() 
+                  << " rules, base=" << weightedBaseSurprisal 
+                  << ", synergy_term=" << (comboHandler.getPositiveWeight() * addedSynergy)
+                  << ", total=" << groupSurprisal << std::endl;
+    }
+    
+    return groupSurprisal;
+}
+
 void ApplicationHandler::debugOutputQueryInfo(
     int queryCount,
     int querySource,
@@ -38,9 +201,9 @@ void ApplicationHandler::debugOutputQueryInfo(
     std::cout << "  Query (Strings): \"" << index->getStringOfNodeId(querySource) << "\" \"" 
               << index->getStringOfRelId(queryRel) << "\" ?" << std::endl;
     std::cout << "  Direction: Predicting " << (queryDirIsTail ? "TAIL" : "HEAD") << std::endl;
-    std::cout << "  Combo Positive Method: " << comboHandler.getNoisyorPositiveMethod() << std::endl;
-    std::cout << "  Combo Negative Method: " << comboHandler.getNoisyorNegativeMethod() << std::endl;
-    std::cout << "  Combo Lift Ratio: " << comboHandler.getLiftRatio() << std::endl;
+    std::cout << "  Combo Positive Method: " << comboHandler.getPositiveMethod() << std::endl;
+    std::cout << "  Combo Positive Weight: " << comboHandler.getPositiveWeight() << std::endl;
+    std::cout << "  Combo Negative Weight: " << comboHandler.getNegativeWeight() << std::endl;
     std::cout << "  Aggregation Function: " << comboHandler.getAggregationFunction() << std::endl;
     
     std::cout << "  Total Candidates: " << candRules.size() << std::endl;
@@ -64,10 +227,10 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
     int numGroundTruth
 ) {
     // Check if we need to do anything
-    bool hasNegativeMethod = (comboHandler.getNoisyorNegativeMethod() != "none");
-    bool hasPositiveMethod = (comboHandler.getNoisyorPositiveMethod() != "none");
+    bool hasPositiveMethod = (comboHandler.getPositiveMethod() != "none");
+    double negativeWeight = comboHandler.getNegativeWeight();
     
-    if (!hasNegativeMethod && !hasPositiveMethod) {
+    if (!hasPositiveMethod && negativeWeight == 0.0) {
         return;
     }
     
@@ -108,16 +271,9 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
         if (appliedRules.empty()) continue;
         
         // ========== Step 0: Build local graph ==========
-        // Build rule index for efficient lookup
-        std::unordered_map<size_t, Rule*> hashToAppliedRule;
         std::unordered_map<size_t, int> hashToIndex;
-        std::vector<size_t> indexToHash(appliedRules.size());
-        
         for (size_t i = 0; i < appliedRules.size(); i++) {
-            size_t ruleHash = appliedRules[i]->getRuleHash();
-            hashToAppliedRule[ruleHash] = appliedRules[i];
-            hashToIndex[ruleHash] = i;
-            indexToHash[i] = ruleHash;
+            hashToIndex[appliedRules[i]->getRuleHash()] = i;
         }
         
         // Build combo2count and find fulfilled combos
@@ -136,333 +292,78 @@ void ApplicationHandler::applyComboAdjustmentsNoisyor(
             }
         }
         
-        // Separate positive and negative edges
-        // E+ = {(i,j) | lift_ij > 0 and i,j in R}
-        // E- = {(i,j) | lift_ij < 0 and i,j in R}
-        struct Edge {
-            int i, j;           // indices in appliedRules
-            size_t hash1, hash2; // rule hashes
-            double lift;
-            Combo* combo;
-        };
-        
-        std::vector<Edge> positiveEdges;
-        std::vector<Edge> negativeEdges;
-        
-        for (Combo* combo : fulfilledCombos) {
-            double lift = combo->getSurprisalLift();
-            
-            if (hashToIndex.count(combo->ruleHash1) && hashToIndex.count(combo->ruleHash2)) {
-                Edge edge;
-                edge.hash1 = combo->ruleHash1;
-                edge.hash2 = combo->ruleHash2;
-                edge.i = hashToIndex[combo->ruleHash1];
-                edge.j = hashToIndex[combo->ruleHash2];
-                edge.lift = lift;
-                edge.combo = combo;
-                
-                if (lift > 0) {
-                    positiveEdges.push_back(edge);
-                } else if (lift < 0) {
-                    negativeEdges.push_back(edge);
-                }
-            }
-        }
-        
-        if (shouldDebug && (!positiveEdges.empty() || !negativeEdges.empty())) {
+        if (shouldDebug) {
             std::cout << "\n  Candidate " << candidate << " (" 
                       << data.getIndex()->getStringOfNodeId(candidate) << "):" << std::endl;
             std::cout << "    Applied Rules: " << appliedRules.size() << std::endl;
             std::cout << "    Fulfilled Combos: " << fulfilledCombos.size() << std::endl;
-            std::cout << "    Positive Edges (E+): " << positiveEdges.size() << std::endl;
-            std::cout << "    Negative Edges (E-): " << negativeEdges.size() << std::endl;
-            std::cout << "    Original Surprisal: " << aggregatedSurprisal[candidate] << std::endl;
         }
         
-        // ========== Apply Negative Method: Determine retained rules R' ==========
-        std::unordered_set<int> retainedIndices;
-        for (size_t i = 0; i < appliedRules.size(); i++) {
-            retainedIndices.insert(i);
-        }
+        double newSurprisal = 0.0;
         
-        if (comboHandler.getNoisyorNegativeMethod() == "none") {
-            // Keep all rules, do nothing
+        // ========== Check if_grouping parameter ==========
+        if (comboHandler.getIfGrouping()) {
+            // Group rules into two types: unary and binary
+            // Binary: only type "b" rules
+            // Unary: all other rules (types "c", "d", "z", "xxc", "xxd")
+            std::vector<int> unaryIndices, binaryIndices;
             
-        } else if (comboHandler.getNoisyorNegativeMethod() == "prune") {
-            // ========== Prune Method: Domination Pruning ==========
-            // For each negative edge, delete the weaker rule
-            
-            std::unordered_set<int> deleteList;
-            
-            for (const Edge& edge : negativeEdges) {
-                double w_i = appliedRules[edge.i]->getSurprisal();
-                double w_j = appliedRules[edge.j]->getSurprisal();
+            for (size_t i = 0; i < appliedRules.size(); i++) {
+                Rule* rule = appliedRules[i];
+                std::string rType(rule->type);
                 
-                // The weaker rule in each negative edge should be deleted
-                if (w_i >= w_j) {
-                    deleteList.insert(edge.j);  // j is weaker
+                if (rType == "b") {
+                    // Binary rules: type "b" only
+                    binaryIndices.push_back(i);
                 } else {
-                    deleteList.insert(edge.i);  // i is weaker
+                    // Unary rules: all other types ("c", "d", "z", "xxc", "xxd")
+                    unaryIndices.push_back(i);
                 }
-            }
-            
-            // Get retained indices R' = R \ delete_list
-            for (int idx : deleteList) {
-                retainedIndices.erase(idx);
-            }
-            
-            if (shouldDebug && !deleteList.empty()) {
-                std::cout << "    [PRUNE] Deleted " << deleteList.size() << " dominated rules:" << std::endl;
-                for (int idx : deleteList) {
-                    Rule* rule = appliedRules[idx];
-                    std::cout << "      - " << rule->computeRuleString(data.getIndex())
-                              << " (surprisal=" << rule->getSurprisal() << ")" << std::endl;
-                }
-            }
-            
-        } else if (comboHandler.getNoisyorNegativeMethod() == "cluster") {
-            // ========== Cluster Method: Connected Components ==========
-            // Build undirected graph from negative edges and find connected components
-            
-            int numRules = appliedRules.size();
-            std::vector<std::vector<int>> adjList(numRules);
-            
-            for (const Edge& edge : negativeEdges) {
-                adjList[edge.i].push_back(edge.j);
-                adjList[edge.j].push_back(edge.i);
-            }
-            
-            // Find connected components using DFS
-            std::vector<bool> visited(numRules, false);
-            std::vector<std::vector<int>> components;
-            
-            for (int i = 0; i < numRules; i++) {
-                if (!visited[i]) {
-                    std::vector<int> component;
-                    std::vector<int> stack = {i};
-                    
-                    while (!stack.empty()) {
-                        int node = stack.back();
-                        stack.pop_back();
-                        
-                        if (visited[node]) continue;
-                        visited[node] = true;
-                        component.push_back(node);
-                        
-                        for (int neighbor : adjList[node]) {
-                            if (!visited[neighbor]) {
-                                stack.push_back(neighbor);
-                            }
-                        }
-                    }
-                    
-                    components.push_back(component);
-                }
-            }
-            
-            // Select representative from each component (max surprisal)
-            retainedIndices.clear();
-            for (const auto& component : components) {
-                int bestIdx = component[0];
-                double maxSurprisal = appliedRules[bestIdx]->getSurprisal();
-                
-                for (int idx : component) {
-                    double surprisal = appliedRules[idx]->getSurprisal();
-                    if (surprisal > maxSurprisal) {
-                        maxSurprisal = surprisal;
-                        bestIdx = idx;
-                    }
-                }
-                
-                retainedIndices.insert(bestIdx);
             }
             
             if (shouldDebug) {
-                int clusteredRules = appliedRules.size() - retainedIndices.size();
-                if (clusteredRules > 0) {
-                    std::cout << "    [CLUSTER] " << components.size() << " components, "
-                              << "retained " << retainedIndices.size() << "/" << appliedRules.size() 
-                              << " rules" << std::endl;
-                    
-                    // Show components with >1 rule
-                    for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
-                        const auto& comp = components[compIdx];
-                        if (comp.size() > 1) {
-                            std::cout << "      Component #" << (compIdx+1) << " (" << comp.size() << " rules):" << std::endl;
-                            for (int idx : comp) {
-                                Rule* rule = appliedRules[idx];
-                                bool isRep = (retainedIndices.count(idx) > 0);
-                                std::cout << "        " << (isRep ? "[REP] " : "      ")
-                                          << rule->computeRuleString(data.getIndex())
-                                          << " (surprisal=" << rule->getSurprisal() << ")" << std::endl;
-                            }
-                        }
-                    }
-                }
+                std::cout << "    [GROUPING] Unary: " << unaryIndices.size()
+                          << ", Binary: " << binaryIndices.size() << std::endl;
             }
+            
+            // Calculate surprisal for each group
+            double unarySurprisal = calculateGroupSurprisal(
+                unaryIndices, appliedRules, fulfilledCombos, hashToIndex,
+                shouldDebug, data, "unary"
+            );
+            
+            double binarySurprisal = calculateGroupSurprisal(
+                binaryIndices, appliedRules, fulfilledCombos, hashToIndex,
+                shouldDebug, data, "binary"
+            );
+            
+            // Combine with weights (unary weight is fixed at 1.0)
+            double binaryWeight = comboHandler.getBinaryWeight();
+            
+            newSurprisal = unarySurprisal + binaryWeight * binarySurprisal;
+            
+            if (shouldDebug) {
+                std::cout << "    Final weighted combination:" << std::endl;
+                std::cout << "      Unary: 1.0 * " << unarySurprisal 
+                          << " = " << unarySurprisal << std::endl;
+                std::cout << "      Binary: " << binaryWeight << " * " << binarySurprisal 
+                          << " = " << (binaryWeight * binarySurprisal) << std::endl;
+                std::cout << "      Total surprisal: " << newSurprisal << std::endl;
+            }
+        } else {
+            // No grouping: treat all rules together
+            std::vector<int> allIndices;
+            for (size_t i = 0; i < appliedRules.size(); i++) {
+                allIndices.push_back(i);
+            }
+            
+            newSurprisal = calculateGroupSurprisal(
+                allIndices, appliedRules, fulfilledCombos, hashToIndex,
+                shouldDebug, data, "all_rules"
+            );
         }
         
-        // ========== Recalculate base surprisal for retained rules ==========
-        double baseSurprisal = 0.0;
-        for (int idx : retainedIndices) {
-            baseSurprisal += appliedRules[idx]->getSurprisal();
-        }
-        
-        // ========== Apply Positive Method: Synergy from positive edges ==========
-        double addedSynergy = 0.0;
-        
-        if (comboHandler.getNoisyorPositiveMethod() == "none") {
-            // No positive synergy
-            
-        } else if (comboHandler.getNoisyorPositiveMethod() == "mst") {
-            // ========== MST Method: Maximum Spanning Forest on positive edges ==========
-            // Only consider edges where BOTH endpoints are in R'
-            
-            std::vector<Edge> eligiblePositiveEdges;
-            for (const Edge& edge : positiveEdges) {
-                if (retainedIndices.count(edge.i) && retainedIndices.count(edge.j)) {
-                    eligiblePositiveEdges.push_back(edge);
-                }
-            }
-            
-            if (!eligiblePositiveEdges.empty()) {
-                // Sort edges by lift (descending) for Kruskal's MST
-                std::sort(eligiblePositiveEdges.begin(), eligiblePositiveEdges.end(),
-                    [](const Edge& a, const Edge& b) {
-                        return a.lift > b.lift;
-                    });
-                
-                // Union-Find for Kruskal's algorithm
-                std::unordered_map<int, int> parent;
-                std::unordered_map<int, int> rank_uf;
-                
-                // Initialize each retained node as its own parent
-                for (int idx : retainedIndices) {
-                    parent[idx] = idx;
-                    rank_uf[idx] = 0;
-                }
-                
-                // Find with path compression
-                std::function<int(int)> find = [&](int x) -> int {
-                    if (parent[x] != x) {
-                        parent[x] = find(parent[x]);
-                    }
-                    return parent[x];
-                };
-                
-                // Union by rank
-                auto unionSets = [&](int x, int y) -> bool {
-                    int px = find(x);
-                    int py = find(y);
-                    if (px == py) return false; // Already in same set (would create cycle)
-                    
-                    if (rank_uf[px] < rank_uf[py]) {
-                        parent[px] = py;
-                    } else if (rank_uf[px] > rank_uf[py]) {
-                        parent[py] = px;
-                    } else {
-                        parent[py] = px;
-                        rank_uf[px]++;
-                    }
-                    return true;
-                };
-                
-                // Build MST (actually maximum spanning forest)
-                std::vector<Edge> mstEdges;
-                for (const Edge& edge : eligiblePositiveEdges) {
-                    if (unionSets(edge.i, edge.j)) {
-                        mstEdges.push_back(edge);
-                        addedSynergy += comboHandler.getLiftRatio() * edge.lift;
-                    }
-                }
-                
-                if (shouldDebug && !mstEdges.empty()) {
-                    std::cout << "    [MST] Selected " << mstEdges.size() << " tree edges:" << std::endl;
-                    for (size_t i = 0; i < mstEdges.size(); i++) {
-                        const Edge& edge = mstEdges[i];
-                        std::cout << "      Edge #" << (i+1) << ": lift=" << edge.lift
-                                  << " (scaled: " << (comboHandler.getLiftRatio() * edge.lift) << ")" << std::endl;
-                    }
-                    std::cout << "      Total synergy (alpha * sum(lifts)): " << addedSynergy << std::endl;
-                }
-            }
-            
-        } else if (comboHandler.getNoisyorPositiveMethod() == "matching1" || comboHandler.getNoisyorPositiveMethod() == "matching2") {
-            // ========== b-Matching Method: Maximum Weight b-Matching on positive edges ==========
-            // Greedy approximation: sort edges by weight, select if both endpoints' degree < b
-            // matching1: b=1 (maximum matching), matching2: b=2
-            
-            int b = (comboHandler.getNoisyorPositiveMethod() == "matching1") ? 1 : 2;
-            
-            // Only consider edges where BOTH endpoints are in R'
-            std::vector<Edge> eligiblePositiveEdges;
-            for (const Edge& edge : positiveEdges) {
-                if (retainedIndices.count(edge.i) && retainedIndices.count(edge.j)) {
-                    eligiblePositiveEdges.push_back(edge);
-                }
-            }
-            
-            if (!eligiblePositiveEdges.empty()) {
-                // Sort edges by lift (descending) for greedy selection
-                std::sort(eligiblePositiveEdges.begin(), eligiblePositiveEdges.end(),
-                    [](const Edge& a, const Edge& b) {
-                        return a.lift > b.lift;
-                    });
-                
-                // Track degree of each node
-                std::unordered_map<int, int> nodeDegree;
-                for (int idx : retainedIndices) {
-                    nodeDegree[idx] = 0;
-                }
-                
-                // Greedily select edges
-                std::vector<Edge> selectedEdges;
-                for (const Edge& edge : eligiblePositiveEdges) {
-                    // Check if both endpoints have degree < b
-                    if (nodeDegree[edge.i] < b && nodeDegree[edge.j] < b) {
-                        selectedEdges.push_back(edge);
-                        nodeDegree[edge.i]++;
-                        nodeDegree[edge.j]++;
-                        addedSynergy += comboHandler.getLiftRatio() * edge.lift;
-                    }
-                }
-                
-                if (shouldDebug && !selectedEdges.empty()) {
-                    std::cout << "    [MATCHING" << b << "] Selected " << selectedEdges.size() << " edges:" << std::endl;
-                    for (size_t i = 0; i < selectedEdges.size(); i++) {
-                        const Edge& edge = selectedEdges[i];
-                        std::cout << "      Edge #" << (i+1) << ": lift=" << edge.lift
-                                  << " (scaled: " << (comboHandler.getLiftRatio() * edge.lift) << ")"
-                                  << " [rule " << edge.i << " <-> rule " << edge.j << "]" << std::endl;
-                    }
-                    std::cout << "      Total synergy (alpha * sum(lifts)): " << addedSynergy << std::endl;
-                    
-                    // Show node degree statistics
-                    std::cout << "      Node degree distribution:" << std::endl;
-                    std::unordered_map<int, int> degreeCount;
-                    for (const auto& pair : nodeDegree) {
-                        if (pair.second > 0) {
-                            degreeCount[pair.second]++;
-                        }
-                    }
-                    for (int deg = 0; deg <= b; deg++) {
-                        if (degreeCount.count(deg)) {
-                            std::cout << "        Degree " << deg << ": " << degreeCount[deg] << " nodes" << std::endl;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ========== Update aggregated surprisal ==========
-        double newSurprisal = baseSurprisal + addedSynergy;
         aggregatedSurprisal[candidate] = newSurprisal;
-        
-        if (shouldDebug && (retainedIndices.size() < appliedRules.size() || addedSynergy > 0)) {
-            std::cout << "    Final: base=" << baseSurprisal 
-                      << ", synergy=" << addedSynergy 
-                      << ", total=" << newSurprisal << std::endl;
-        }
     }
     
     // Track ground truth ranking changes
@@ -773,10 +674,9 @@ void ApplicationHandler::sortAndProcessNoisy(std::vector<std::pair<int,double>>&
                 if (!candRules.empty()) {
                     int tail = candRules.begin()->first;
                     std::cout << "  Aggregation Method: " << comboHandler.getAggregationFunction() << std::endl;
-                    std::cout << "  Combo Positive Method: " << comboHandler.getNoisyorPositiveMethod() << std::endl;
-                    std::cout << "  Combo Negative Method: " << comboHandler.getNoisyorNegativeMethod() << std::endl;
-                    std::cout << "  Combo Lift Ratio: " << comboHandler.getLiftRatio() << std::endl;
-                    
+                std::cout << "  Combo Positive Method: " << comboHandler.getPositiveMethod() << std::endl;
+                std::cout << "  Combo Positive Weight: " << comboHandler.getPositiveWeight() << std::endl;
+                std::cout << "  Combo Negative Weight: " << comboHandler.getNegativeWeight() << std::endl;
                     std::vector<Rule*>& appliedRules = candRules.begin()->second;
                     std::cout << "\n  Applied Rules: " << appliedRules.size() << std::endl;
                     
@@ -1029,7 +929,8 @@ void ApplicationHandler::writeRules(TripleStorage& target, std::string filepath,
 }
 
 void ApplicationHandler::scoreMaxPlus(
-    const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train
+    const NodeToPredRules& candToRules, std::vector<std::pair<int, double>>& aggrCand, TripleStorage& train, RuleStorage& rules,
+    int queryRel, int querySource, bool queryDirIsTail, const int* groundTruthTargets, int numGroundTruth
      ){
     
     // for noisy-or we can simply sort according to aggrCand after scoring

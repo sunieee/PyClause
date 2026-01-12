@@ -26,18 +26,6 @@ public:
         if_debug = debug;
     }
     
-    void setNoisyorPositiveMethod(std::string method) {
-        noisyor_positive_method = method;
-    }
-    
-    void setNoisyorNegativeMethod(std::string method) {
-        noisyor_negative_method = method;
-    }
-    
-    void setLiftRatio(double ratio) {
-        lift_ratio = ratio;
-    }
-    
     void setQueryTopK(int num) {
         query_topk = num;
     }
@@ -46,14 +34,44 @@ public:
         aggregation_function = func;
     }
     
+    // Setters for new hyperparameters
+    void setBinaryWeight(double weight) {
+        binary_weight = weight;
+    }
+    
+    void setAggregateSharpness(double sharpness) {
+        aggregate_sharpness = sharpness;
+    }
+    
+    void setNegativeWeight(double weight) {
+        negative_weight = weight;
+    }
+    
+    void setPositiveWeight(double weight) {
+        positive_weight = weight;
+    }
+    
+    void setPositiveMethod(std::string method) {
+        positive_method = method;
+    }
+    
+    void setIfGrouping(bool grouping) {
+        if_grouping = grouping;
+    }
+    
     // Getters
     bool getIfLoad() const { return if_load; }
     bool getIfDebug() const { return if_debug; }
-    std::string getNoisyorPositiveMethod() const { return noisyor_positive_method; }
-    std::string getNoisyorNegativeMethod() const { return noisyor_negative_method; }
-    double getLiftRatio() const { return lift_ratio; }
     int getQueryTopK() const { return query_topk; }
     std::string getAggregationFunction() const { return aggregation_function; }
+    
+    // Getters for new hyperparameters
+    double getBinaryWeight() const { return binary_weight; }
+    double getAggregateSharpness() const { return aggregate_sharpness; }
+    double getNegativeWeight() const { return negative_weight; }
+    double getPositiveWeight() const { return positive_weight; }
+    std::string getPositiveMethod() const { return positive_method; }
+    bool getIfGrouping() const { return if_grouping; }
     
     // Load options from configuration map - for pre-extracted options (already without prefix)
     void loadOptions(const std::map<std::string, std::string>& options, bool verbose = false) {
@@ -78,11 +96,14 @@ public:
         std::vector<OptionHandler> handlers = {
             {"if_load", [this, strToBool](std::string val) { setIfLoad(strToBool(val)); }},
             {"if_debug", [this, strToBool](std::string val) { setIfDebug(strToBool(val)); }},
-            {"noisyor_positive_method", [this](std::string val) { setNoisyorPositiveMethod(val); }},
-            {"noisyor_negative_method", [this](std::string val) { setNoisyorNegativeMethod(val); }},
-            {"lift_ratio", [this](std::string val) { setLiftRatio(std::stod(val)); }},
             {"query_topk", [this](std::string val) { setQueryTopK(std::stoi(val)); }},
             {"aggregation_function", [this](std::string val) { setAggregationFunction(val); }},
+            {"binary_weight", [this](std::string val) { setBinaryWeight(std::stod(val)); }},
+            {"aggregate_sharpness", [this](std::string val) { setAggregateSharpness(std::stod(val)); }},
+            {"negative_weight", [this](std::string val) { setNegativeWeight(std::stod(val)); }},
+            {"positive_weight", [this](std::string val) { setPositiveWeight(std::stod(val)); }},
+            {"positive_method", [this](std::string val) { setPositiveMethod(val); }},
+            {"if_grouping", [this, strToBool](std::string val) { setIfGrouping(strToBool(val)); }},
         };
 
         for (auto& handler : handlers) {
@@ -106,9 +127,10 @@ public:
         
         // List of combo_handler option names (without prefix)
         std::vector<std::string> comboOptionNames = {
-            "noisyor_positive_method", "noisyor_negative_method", 
-            "lift_ratio", "query_topk", "aggregation_function", 
-            "if_load", "if_debug"
+            "query_topk", "aggregation_function", 
+            "if_load", "if_debug",
+            "binary_weight", "aggregate_sharpness",
+            "negative_weight", "positive_weight", "positive_method", "if_grouping"
         };
         
         // Check if any combo options exist
@@ -168,17 +190,6 @@ private:
     // Enable debug output for combo rule loading and processing
     bool if_debug = false;
     
-    // Positive method: how to aggregate synergistic (positive lift) combo edges
-    // Options: "none", "mst", "matching1", "matching2"
-    std::string noisyor_positive_method = "none";
-    
-    // Negative method: how to handle conflicting (negative lift) combo edges
-    // Options: "none", "prune", "cluster"
-    std::string noisyor_negative_method = "none";
-    
-    // Scaling factor (alpha) for positive synergy lift values
-    double lift_ratio = 1.0;
-    
     // Number of top queries/triples to output debug information for (thread 0 only)
     int query_topk = 100;
     
@@ -186,6 +197,27 @@ private:
     // maxplus: max-aggregation (highest rule confidence)
     // noisyor: noisy-or aggregation (combines multiple rule confidences)
     std::string aggregation_function = "maxplus";
+    
+    // ===== Additional Hyperparameters for Link Prediction and Triple Classification =====
+    
+    // λ: Weight for binary rules (unary rules have fixed weight 1.0)
+    double binary_weight = 1.0;
+    
+    // τ: Aggregate sharpness (controls transition between noisyor and maxplus)
+    double aggregate_sharpness = 1.0;
+    
+    // β: Negative edge suppression strength (redundancy removal)
+    double negative_weight = 1.0;
+    
+    // ρ: Positive edge synergy strength
+    double positive_weight = 1.0;
+    
+    // Method for selecting positive synergy edges
+    // Options: "mst", "matching1", "matching2", "all"
+    std::string positive_method = "matching1";
+    
+    // Whether to group rules by their combo relationships
+    bool if_grouping = true;
 };
 
 #endif // COMBOHANDLER_H

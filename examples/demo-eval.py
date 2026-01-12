@@ -19,9 +19,14 @@ argparser.add_argument("--dataset", type=str, default="wnrr", help="dataset to u
 argparser.add_argument("--rules", type=str, default="", help="rules to use")
 argparser.add_argument("--ranking_file", type=str, default="", help="rules to use")
 argparser.add_argument("--aggregation_function", type=str, default="maxplus", help="aggregation function to use")
-argparser.add_argument("--noisyor_positive_method", type=str, default="none", help="combo noisy or method to use")
-argparser.add_argument("--noisyor_negative_method", type=str, default="none", help="combo noisy or method to use")
-argparser.add_argument("--lift_ratio", type=float, default=1.0, help="whether to disable u_xxd rules")
+# New hyperparameters for link prediction and triple classification
+argparser.add_argument("--binary_weight", type=float, default=1.0, help="λ: weight for binary rules (unary rules have fixed weight 1.0)")
+argparser.add_argument("--aggregate_sharpness", type=float, default=1.0, help="τ: aggregate sharpness (noisyor↔maxplus)")
+argparser.add_argument("--negative_weight", type=float, default=1.0, help="β: negative edge suppression strength")
+argparser.add_argument("--positive_weight", type=float, default=1.0, help="ρ: positive edge synergy strength")
+argparser.add_argument("--positive_method", type=str, default="matching1", help="positive method: mst, matching1, matching2, all")
+argparser.add_argument("--if_grouping", action="store_true", default=True, help="whether to group rules by combo relationships")
+argparser.add_argument("--no_grouping", action="store_true", help="disable grouping of rules")
 argparser.add_argument("--disable_b", action="store_true", help="whether to disable b rules")
 argparser.add_argument("--disable_combo", action="store_true", help="whether to disable combo rules")
 argparser.add_argument("--disable_u_d", action="store_true", help="whether to disable u_d rules")
@@ -60,10 +65,15 @@ options.set("loader.b_max_length", args.b_max_length)
 options.set("loader.combo_handler.aggregation_function", args.aggregation_function)
 options.set("loader.combo_handler.if_load", not args.disable_combo)
 options.set("loader.combo_handler.if_debug", False)
-options.set("loader.combo_handler.noisyor_positive_method", args.noisyor_positive_method)
-options.set("loader.combo_handler.noisyor_negative_method", args.noisyor_negative_method)
-options.set("loader.combo_handler.lift_ratio", args.lift_ratio)
 options.set("loader.combo_handler.query_topk", 100)
+
+# 新增超参数配置
+options.set("loader.combo_handler.binary_weight", args.binary_weight)
+options.set("loader.combo_handler.aggregate_sharpness", args.aggregate_sharpness)
+options.set("loader.combo_handler.negative_weight", args.negative_weight)
+options.set("loader.combo_handler.positive_weight", args.positive_weight)
+options.set("loader.combo_handler.positive_method", args.positive_method)
+options.set("loader.combo_handler.if_grouping", args.if_grouping and not args.no_grouping)
 
 
 # *** 关键：设置线程数 ***

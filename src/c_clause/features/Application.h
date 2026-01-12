@@ -127,6 +127,17 @@ private:
         RuleStorage& rules,
         TripleStorage& data
     );
+    
+    // Helper function to calculate surprisal for a group of rules
+    double calculateGroupSurprisal(
+        const std::vector<int>& groupIndices,
+        const std::vector<Rule*>& allRules,
+        const std::vector<Combo*>& allFulfilledCombos,
+        const std::unordered_map<size_t, int>& hashToIndex,
+        bool shouldDebug,
+        TripleStorage& data,
+        const std::string& groupType
+    );
 
 
 

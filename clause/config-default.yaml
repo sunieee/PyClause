@@ -249,31 +249,49 @@ combo_handler:
   #   - Sorting based on -sum_i(log(1-conf_i)) and transformed before output
   #   - Mitigates floating point considerations
   #   - Works with combo rules for synergy/conflict handling
+  #   - Negative edges: automatically applies prune method with weighted suppression
+  #     (surprisal' = surprisal / (1 + negative_weight * in_degree))
   aggregation_function: "maxplus"
-  
-  # Positive method: how to aggregate synergistic (positive lift) combo edges
-  # Options: "none", "mst", "matching1", "matching2"
-  #   - none: no positive synergy from combos
-  #   - mst: maximum spanning tree (allows tree structure, may create hubs)
-  #   - matching1: maximum matching (b=1, each rule connects to at most 1 other)
-  #   - matching2: b-matching (b=2, each rule connects to at most 2 others, more balanced)
-  noisyor_positive_method: "none"
-  
-  # Negative method: how to handle conflicting (negative lift) combo edges
-  # Options: "none", "prune", "cluster"
-  #   - none: keep all rules (no filtering)
-  #   - prune: remove weaker rules in each negative edge (simple domination)
-  #   - cluster: group by connected components, keep strongest in each cluster
-  noisyor_negative_method: "none"
-  
-  # Scaling factor (alpha) for positive synergy lift values
-  # Final synergy contribution = alpha * sum(selected_positive_lifts)
-  # Recommended: 0.5-1.0 to control synergy strength
-  lift_ratio: 1.0
   
   # Number of top queries/triples to output debug information for (thread 0 only)
   # Set to 0 to disable debug output, useful for development and debugging
   query_topk: 100
+  
+  # ===== Additional Hyperparameters for Link Prediction and Triple Classification =====
+  
+  # λ: Weight for binary rules (type "b" rules)
+  # Unary rules (all other types) have fixed weight 1.0
+  # Controls the relative influence of binary rules
+  # Options: 0.5, 1, 2 (default: 1)
+  binary_weight: 1.0
+  
+  # τ: Aggregate sharpness (controls transition between noisyor and maxplus)
+  # Higher values make aggregation sharper (closer to max)
+  # Options: 1, 1.5, 2, 3 (default: 1)
+  aggregate_sharpness: 1.0
+  
+  # β: Negative edge suppression strength (redundancy removal)
+  # Controls how strongly conflicting rules suppress each other
+  # Options: 0, 0.5, 1, 2 (default: 1)
+  negative_weight: 1.0
+  
+  # ρ: Positive edge synergy strength
+  # Controls how strongly synergistic rules reinforce each other
+  # Options: 0, 0.5, 1, 2 (default: 1)
+  positive_weight: 1.0
+  
+  # Method for selecting positive synergy edges
+  # Options: "mst", "matching1", "matching2", "all" (default: "matching1")
+  #   - mst: maximum spanning tree (allows tree structure)
+  #   - matching1: maximum matching (b=1, each rule connects to at most 1 other)
+  #   - matching2: b-matching (b=2, each rule connects to at most 2 others)
+  #   - all: use all positive edges
+  positive_method: "matching1"
+  
+  # Whether to group rules by their combo relationships
+  # If true, rules are grouped and processed together based on combo edges
+  # Options: true, false (default: true)
+  if_grouping: true
 
 
 ## clause options ############################################################
