@@ -25,7 +25,6 @@ argparser.add_argument("--aggregate_sharpness", type=float, default=1.0, help="�
 argparser.add_argument("--negative_weight", type=float, default=1.0, help="β: negative edge suppression strength")
 argparser.add_argument("--positive_weight", type=float, default=1.0, help="ρ: positive edge synergy strength")
 argparser.add_argument("--positive_method", type=str, default="matching1", help="positive method: mst, matching1, matching2, all")
-argparser.add_argument("--if_grouping", action="store_true", default=True, help="whether to group rules by combo relationships")
 argparser.add_argument("--no_grouping", action="store_true", help="disable grouping of rules")
 argparser.add_argument("--disable_b", action="store_true", help="whether to disable b rules")
 argparser.add_argument("--disable_combo", action="store_true", help="whether to disable combo rules")
@@ -35,6 +34,7 @@ argparser.add_argument("--disable_zero", action="store_true", help="whether to d
 argparser.add_argument("--disable_u_xxc", action="store_true", help="whether to disable u_xxc rules")
 argparser.add_argument("--disable_u_xxd", action="store_true", help="whether to disable u_xxd rules")
 argparser.add_argument("--b_max_length", type=int, default=-1, help="whether to disable u_xxd rules")
+argparser.add_argument("--num_unseen", type=int, default=5, help="whether to disable u_xxd rules")
 argparser.add_argument("--d_weight", type=float, default=0.1, help="whether to disable u_xxd rules")
 argparser.add_argument("--z_weight", type=float, default=0.01, help="whether to disable u_xxd rules")
 argparser.add_argument("--test_valid_split", type=str, default="", help="whether to disable u_xxd rules")
@@ -60,6 +60,7 @@ options.set("loader.load_u_c_rules", not args.disable_u_c)
 options.set("loader.load_u_xxc_rules", not args.disable_u_xxc)
 options.set("loader.load_u_xxd_rules", not args.disable_u_xxd)
 options.set("loader.b_max_length", args.b_max_length)
+options.set("loader.num_unseen", args.num_unseen)
 
 # ComboHandler 配置现在是 Loader 的一部分，使用 loader.combo_handler.* 路径
 options.set("loader.combo_handler.aggregation_function", args.aggregation_function)
@@ -73,7 +74,7 @@ options.set("loader.combo_handler.aggregate_sharpness", args.aggregate_sharpness
 options.set("loader.combo_handler.negative_weight", args.negative_weight)
 options.set("loader.combo_handler.positive_weight", args.positive_weight)
 options.set("loader.combo_handler.positive_method", args.positive_method)
-options.set("loader.combo_handler.if_grouping", args.if_grouping and not args.no_grouping)
+options.set("loader.combo_handler.if_grouping", not args.no_grouping)
 
 
 # *** 关键：设置线程数 ***

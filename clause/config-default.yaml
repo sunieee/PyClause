@@ -35,11 +35,15 @@ loader:
   num_threads: -1
   # set to False to display less output information
   verbose: True
+  
+  # Unified laplace smoothing parameter for all rule types
+  # conf = support / (num_unseen + num_body_groundings)
+  num_unseen: 5
+  
   ### Rule options
   ## B rules
   # parsable example: "h(X,Y) <= b1(A,X), b2(A,Y)"
   load_b_rules: True
-  b_num_unseen: 5
   b_min_support: -1
   b_min_preds: -1
   b_min_conf: 0.0001
@@ -55,7 +59,6 @@ loader:
   # "h(X,c) <= b1(X,d)"
   # "h(c,Y) <= b1(Y,A), b2(d,A)" 
   load_u_c_rules: True
-  c_num_unseen: 5
   c_min_support: -1
   c_min_preds: -1
   c_min_conf: 0.0001
@@ -70,7 +73,6 @@ loader:
   # we use AnyBURL default here
   d_weight: 0.1
   d_max_branching_factor: -1 #-1 for off
-  d_num_unseen: 5
   d_min_support: -1
   d_min_preds: -1
   d_min_conf: 0.0001
@@ -84,7 +86,6 @@ loader:
   # weight that is multiplied with the confidence
   # we use AnyBURL default here
   z_weight: 0.01
-  z_num_unseen: 5
   z_min_support: -1
   z_min_preds: -1
   z_min_conf: 0.0001
@@ -93,7 +94,6 @@ loader:
   # parsable example: "h(X,X) <= b1(X,c)" (c being an entity in the graph)
   # has always length 1
   load_u_xxc_rules: True
-  xxc_num_unseen: 5
   xxc_min_support: -1
   xxc_min_preds: -1
   xxc_min_conf: 0.0001
@@ -102,7 +102,6 @@ loader:
   # parsable example: "h(X,X) <= b1(X,A)"
   # has always length 1
   load_u_xxd_rules: True
-  xxd_num_unseen: 5
   xxd_min_support: -1
   xxd_min_preds: -1
   xxd_min_conf: 0.0001
@@ -251,7 +250,7 @@ combo_handler:
   #   - Works with combo rules for synergy/conflict handling
   #   - Negative edges: automatically applies prune method with weighted suppression
   #     (surprisal' = surprisal / (1 + negative_weight * in_degree))
-  aggregation_function: "maxplus"
+  aggregation_function: "noisyor"
   
   # Number of top queries/triples to output debug information for (thread 0 only)
   # Set to 0 to disable debug output, useful for development and debugging
@@ -267,8 +266,8 @@ combo_handler:
   
   # τ: Aggregate sharpness (controls transition between noisyor and maxplus)
   # Higher values make aggregation sharper (closer to max)
-  # Options: 1, 1.5, 2, 3 (default: 1)
-  aggregate_sharpness: 1.0
+  # Options: 0, 0.5, 1, 2 (default: 0)
+  aggregate_sharpness: 0
   
   # β: Negative edge suppression strength (redundancy removal)
   # Controls how strongly conflicting rules suppress each other
