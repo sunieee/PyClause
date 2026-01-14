@@ -106,6 +106,14 @@ loader:
   xxd_min_preds: -1
   xxd_min_conf: 0.0001
 
+  ## Combo rules
+  # Combo rules represent combinations of multiple rules
+  # Format: "h(X,Y) <= body1(X,A) && body2(A,Y)"
+  load_combo: True
+  # Enable debug output during combo rule parsing
+  # Only thread 0 outputs to avoid race conditions, limited to first 100 combos
+  combo_debug: False
+
 
 # calculates rankings based on the "target" KG loaded into DataLoader
 ranking_handler:
@@ -232,14 +240,6 @@ prediction_handler:
 # Combo rule aggregation handler (shared by ranking_handler, qa_handler and prediction_handler)
 # Controls how combo rules are processed and the aggregation function used
 combo_handler:
-  # Whether to load combo rules from rule files
-  # If False, combo rules will be ignored during rule loading
-  if_load: True
-  
-  # Enable debug output for combo rule loading and processing
-  # Useful for troubleshooting combo rule issues
-  if_debug: False
-  
   # Aggregation function: "maxplus" or "noisyor"
   # maxplus: max-aggregation (uses highest rule confidence only)
   #   - Ranking discrimination based on lexicographic comparison of rule confidence sequences

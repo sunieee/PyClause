@@ -266,7 +266,7 @@ std::unique_ptr<Rule> RuleFactory::parseAnytimeRule(std::string rule, int numPre
     // Check for combo (multi-rule) first - contains combo separator
     const std::string comboSep = "&&";
     if (rule.find(comboSep) != std::string::npos) {
-        if (comboDebug) std::cout << "[RuleFactory] Detected combo separator '" << comboSep << "' - parsing as combo" << std::endl;
+        // if (comboDebug) std::cout << "[RuleFactory] Detected combo separator '" << comboSep << "' - parsing as combo" << std::endl;
         parseCombo(rule, numPreds, numTrue, lift);
         return nullptr;  // Combos don't create Rule objects
     }
