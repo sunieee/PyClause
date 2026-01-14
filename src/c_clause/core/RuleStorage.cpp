@@ -66,6 +66,12 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
 
             std::string ruleLine = ruleLines[i];
 
+            // const std::string comboSep = "&&";
+            // if (ruleLine.find(comboSep) != std::string::npos) {
+            //     std::cout<<"Skipping combo rule: " + ruleLine<<std::endl;
+            //     continue;  // Skip combo rules in this parsing pass
+            // }
+
             // expects a line: predicted\t cpredicted\tconf\trulestring
             std::vector<std::string> splitline = util::split(ruleLine, '\t');
 
@@ -79,7 +85,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             if (splitline.size()!=4){
                 std::cout<<"Could not parse this rule because of line format: " + ruleLine<<std::endl;
                 std::cout<<"Skipping but please check your format."<<std::endl;
-
+                continue;
             }
             std::string ruleString = splitline[3];
             int numPreds = std::stoi(splitline[0]);
@@ -178,12 +184,14 @@ std::vector<std::unique_ptr<Rule>>& RuleStorage::getRules(){
     return rules;
  }
 
-void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
+ Combo* RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
     if (!combo) {
         std::cerr << "[RuleStorage] ERROR: Trying to add null combo!" << std::endl;
         std::cerr.flush();
         throw std::runtime_error("Null combo pointer");
     }
+    
+    Combo* ptr = combo.get();
     
     // Add to storage with mutex protection
     try {
@@ -194,6 +202,8 @@ void RuleStorage::addCombo(std::unique_ptr<Combo> combo) {
         std::cerr.flush();
         throw;
     }
+    
+    return ptr;
 }
 
 void RuleStorage::addToComboIndex(size_t ruleHash, Combo* combo) {

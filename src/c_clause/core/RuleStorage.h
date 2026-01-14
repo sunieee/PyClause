@@ -47,7 +47,7 @@ public:
     void clearAll();
     
     // Combo-related methods
-    void addCombo(std::unique_ptr<Combo> combo);
+    Combo* addCombo(std::unique_ptr<Combo> combo);
     void addToComboIndex(size_t ruleHash, Combo* combo);
     std::unordered_map<size_t, std::vector<Combo*>>& getRuleHashToCombos() { return ruleHashToCombos; }
     bool hasCombos() const { return !combos.empty(); }

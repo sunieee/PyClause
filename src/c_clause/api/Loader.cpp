@@ -44,11 +44,7 @@ void Loader::loadRules(std::string path){
     if (!loadedData){
          throw std::runtime_error("Please load the data first with the the Handlers load data functionality.");
     }
-    if (this->numThr==1){
-        rules->readAnyTimeFormat(path, false);
-    }else{
-        rules->readAnyTimeParFormat(path, false, this->numThr);
-    }
+    rules->readAnyTimeParFormat(path, false, this->numThr);
     loadedRules = true;
 }
 

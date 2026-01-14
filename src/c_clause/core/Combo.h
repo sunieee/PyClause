@@ -8,6 +8,10 @@
 #include <limits>
 #include <iostream>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // Forward declaration
 class Rule;
 class RuleStorage;
@@ -39,7 +43,15 @@ public:
         
         computeHash();
         
-        if (comboDebug) {
+        #ifdef _OPENMP
+        int threadNum = omp_get_thread_num();
+        #else
+        int threadNum = 0;
+        #endif
+        
+        // Note: Debug output is controlled by parseCombo's shouldDebug flag
+        // This constructor is called from parseCombo, so we don't duplicate the limit check here
+        if (comboDebug && threadNum == 0) {
             std::cout << "[Combo] Created with 2 rules, conf=" << numTrue << "/" << numPreds << ", lift=" << lift << std::endl;
         }
     }

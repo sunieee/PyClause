@@ -18,14 +18,6 @@ public:
     ComboHandler() {}
     
     // Setters for combo aggregation parameters
-    void setIfLoad(bool load) {
-        if_load = load;
-    }
-    
-    void setIfDebug(bool debug) {
-        if_debug = debug;
-    }
-    
     void setQueryTopK(int num) {
         query_topk = num;
     }
@@ -60,8 +52,6 @@ public:
     }
     
     // Getters
-    bool getIfLoad() const { return if_load; }
-    bool getIfDebug() const { return if_debug; }
     int getQueryTopK() const { return query_topk; }
     std::string getAggregationFunction() const { return aggregation_function; }
     
@@ -94,8 +84,6 @@ public:
         };
 
         std::vector<OptionHandler> handlers = {
-            {"if_load", [this, strToBool](std::string val) { setIfLoad(strToBool(val)); }},
-            {"if_debug", [this, strToBool](std::string val) { setIfDebug(strToBool(val)); }},
             {"query_topk", [this](std::string val) { setQueryTopK(std::stoi(val)); }},
             {"aggregation_function", [this](std::string val) { setAggregationFunction(val); }},
             {"binary_weight", [this](std::string val) { setBinaryWeight(std::stod(val)); }},
@@ -128,7 +116,6 @@ public:
         // List of combo_handler option names (without prefix)
         std::vector<std::string> comboOptionNames = {
             "query_topk", "aggregation_function", 
-            "if_load", "if_debug",
             "binary_weight", "aggregate_sharpness",
             "negative_weight", "positive_weight", "positive_method", "if_grouping"
         };
@@ -184,12 +171,6 @@ public:
     }
 
 private:
-    // Whether to load combo rules from rule files
-    bool if_load = true;
-    
-    // Enable debug output for combo rule loading and processing
-    bool if_debug = false;
-    
     // Number of top queries/triples to output debug information for (thread 0 only)
     int query_topk = 100;
     

@@ -44,11 +44,6 @@ PYBIND11_MODULE(c_clause, m) {
         .def("set_positive_method", &ComboHandler::setPositiveMethod, py::arg("method"))
         .def("get_if_grouping", &ComboHandler::getIfGrouping)
         .def("set_if_grouping", &ComboHandler::setIfGrouping, py::arg("grouping"))
-        // Basic options
-        .def("get_if_load", &ComboHandler::getIfLoad)
-        .def("set_if_load", &ComboHandler::setIfLoad, py::arg("load"))
-        .def("get_if_debug", &ComboHandler::getIfDebug)
-        .def("set_if_debug", &ComboHandler::setIfDebug, py::arg("debug"))
     ;
 
     // RankingHandler()

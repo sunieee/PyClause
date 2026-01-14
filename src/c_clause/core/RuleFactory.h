@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <string>
+#include <atomic>
+#include <mutex>
 
 
 
@@ -66,6 +68,10 @@ private:
 
     // ***Rule options***
     bool createCombo = true;
+    
+    // Combo debug counter and mutex (static, shared across all instances)
+    static std::atomic<int> comboDebugCounter;
+    static std::mutex comboDebugMutex;
 
     // ***Rule options***
     bool createRuleZ = true;
