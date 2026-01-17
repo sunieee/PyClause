@@ -137,8 +137,7 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
         }
     }
     // need this for correctly setting ID's
-    // e.g. we want ID's to be the line order (minus skipped)
-    // to be consistent when rules are written and loaded again
+    // use the original line order (including skipped) to keep IDs stable
     std::cout<< "Indexing rules.." <<std::endl;
     int currID = 0;
     std::unordered_set<size_t> seenHashes;
@@ -150,13 +149,13 @@ void RuleStorage::readAnyTimeParFormat(std::string path, bool exact, int numThre
             // Check for duplicate rules using hash
             if (seenHashes.find(ruleHash) != seenHashes.end()) {
                 std::cerr << "ERROR: Duplicate rule detected!" << std::endl;
-                std::cerr << "Rule ID: " << currID << std::endl;
+                std::cerr << "Rule ID: " << i << std::endl;
                 std::cerr << "Rule: " << ruleStrings_vec[i] << std::endl;
                 throw std::runtime_error("Duplicate rule in RuleStorage");
             }
             seenHashes.insert(ruleHash);
-            
-            rules_ptr[i]->setID(currID);
+
+            rules_ptr[i]->setID(i);
             
             // Store for debugging: hash to rule mapping
             hashToRule[ruleHash] = rules_ptr[i].get();

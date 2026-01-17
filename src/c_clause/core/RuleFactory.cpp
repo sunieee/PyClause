@@ -270,6 +270,17 @@ std::unique_ptr<Rule> RuleFactory::parseAnytimeRule(std::string rule, int numPre
         parseCombo(rule, numPreds, numTrue, lift);
         return nullptr;  // Combos don't create Rule objects
     }
+
+    // 将rule中出现的 X,X 替换为 X,me_myself_i
+    {
+        const std::string from = "X,X";
+        const std::string to = "X,me_myself_i";
+        size_t pos = 0;
+        while ((pos = rule.find(from, pos)) != std::string::npos) {
+            rule.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    }
     
     std::string ruleType;
     std::vector<std::string> headBody = util::splitString(rule, _cfg_prs_ruleSeparator);

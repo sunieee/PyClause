@@ -92,6 +92,28 @@ private:
     //std::unordered_map<int,std::unordered_map<int, QueryResults>> headQueryResults;
     //std::unordered_map<int,std::unordered_map<int, QueryResults>> tailQueryResults;
 
+    // Debug structure for candidate information (must be defined before use)
+    struct CandidateDebugInfo {
+        int candidate;
+        double originalSurprisal;
+        double baseSurprisal;
+        double newSurprisal;
+        int rankBefore;
+        int rankAfter;
+        bool isGT;
+        std::vector<int> edgeIndices; // Indices into the global edges array
+        std::vector<size_t> ruleHashes;  // Store rule hashes to map to global node indices later
+    };
+    
+    // Global edge information structure
+    struct GlobalEdgeInfo {
+        size_t ruleHash1;
+        size_t ruleHash2;
+        int bodySize;
+        int supp;
+        double surprisal;
+    };
+    
     void sortAndProcessNoisy(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
     void sortAndProcessMax(std::vector<std::pair<int,double>>& candScoresToSort, QueryResults& qResults, TripleStorage& data, RuleStorage& rules, int queryRel=-1, int querySource=-1, bool queryDirIsTail=true, const int* groundTruthTargets=nullptr, int numGroundTruth=0);
 
@@ -103,7 +125,9 @@ private:
         bool shouldDebug,
         TripleStorage& data,
         const int* groundTruthTargets,
-        int numGroundTruth
+        int numGroundTruth,
+        std::unordered_map<int, CandidateDebugInfo>* candDebugInfo = nullptr,
+        std::vector<GlobalEdgeInfo>* globalEdges = nullptr
     );
     
     void applyComboAdjustmentsMaxplus(
@@ -128,15 +152,19 @@ private:
         TripleStorage& data
     );
     
-    // Helper function to calculate surprisal for a group of rules
-    double calculateGroupSurprisal(
-        const std::vector<int>& groupIndices,
-        const std::vector<Rule*>& allRules,
-        const std::vector<Combo*>& allFulfilledCombos,
-        const std::unordered_map<size_t, int>& hashToIndex,
-        bool shouldDebug,
+    // Output JSON for rule dependency graph
+    void outputRuleDependencyGraphJSON(
+        int querySource,
+        int queryRel,
+        bool queryDirIsTail,
+        const std::vector<std::pair<int, double>>& sortedCandScores,
+        const std::unordered_map<int, std::vector<Rule*>>& candRules,
+        const std::unordered_map<int, CandidateDebugInfo>& candDebugInfo,
+        const int* groundTruthTargets,
+        int numGroundTruth,
         TripleStorage& data,
-        const std::string& groupType
+        RuleStorage& rules,
+        const std::vector<GlobalEdgeInfo>& globalEdges
     );
 
 
